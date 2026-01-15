@@ -1,0 +1,261 @@
+﻿@{
+    ViewData["Title"] = "Portfolio Builder";
+    var allowedSymbols = new[] { "NIFTYBEES", "SENSEXBEES", "FXI", "BTC", "ETH", "QQQ", "IXN", "IAU", "SLV", "DIA", "VOO", "CASH" };
+}
+
+<div class="container mt-4">
+    <h2>Portfolio Simulation</h2>
+    <hr />
+
+    <div id="periodsContainer">
+    </div>
+
+    <div class="mt-3">
+        <button type="button" class="btn btn-secondary" onclick="addPeriod()">+ Add Period</button>
+        <button type="button" class="btn btn-primary" onclick="submitPortfolio()">Calculate Portfolio</button>
+    </div>
+
+    <div id="resultsArea" class="mt-5" style="display:none;">
+        <h3>Resulting Polynomial: <span id="polynomialOutput" class="text-success font-weight-bold"></span></h3>
+        <div class="card mt-3">
+            <div class="card-body">
+                <canvas id="wealthChart" width="400" height="200"></canvas>
+            </div>
+        </div>
+        <div id="shareSection" class="mt-2" style="display:none;">
+            <p>Share this portfolio: <code id="shareLink" class="bg-light p-1"></code></p>
+        </div>
+    </div>
+</div>
+
+<template id="periodTemplate">
+    <div class="card mb-3 period-entry">
+        <div class="card-header d-flex justify-content-between">
+            <h5 class="mb-0">Investment Period</h5>
+            <button class="btn btn-sm btn-danger" onclick="this.closest('.period-entry').remove()">Remove Period</button>
+        </div>
+        <div class="card-body">
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label>Start Date</label>
+                    <input type="date" class="form-control start-date" required>
+                </div>
+                <div class="col-md-6">
+                    <label>End Date</label>
+                    <input type="date" class="form-control end-date" required>
+                </div>
+            </div>
+            <h6>Assets</h6>
+            <div class="items-container">
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-info mt-2" onclick="addItem(this)">+ Add Asset</button>
+        </div>
+    </div>
+</template>
+
+<template id="itemTemplate">
+    <div class="row mb-2 item-row">
+        <div class="col-md-6">
+            <select class="form-control symbol-select">
+                @foreach (var sym in allowedSymbols)
+                {
+                    <option value="@sym">@sym</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-4">
+            <input type="number" class="form-control percentage-input" placeholder="Percentage (%)" min="0" max="100">
+        </div>
+        <div class="col-md-2">
+            <button class="btn btn-outline-danger" onclick="this.closest('.item-row').remove()">×</button>
+        </div>
+    </div>
+</template>
+
+@section Scripts {
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        let chartInstance = null;
+
+        // Add a new period on page load
+        //document.addEventListener("DOMContentLoaded", () => addPeriod());
+        document.addEventListener("DOMContentLoaded", async () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+
+            if (code) {
+                // You can either decode it on the frontend (if using same logic)
+                // Or simply send it to an "Info" endpoint to get the data back.
+                // For now, let's assume we want to auto-calculate it:
+                await loadFromCode(code);
+            } else {
+                addPeriod();
+            }
+        });
+
+        async function loadFromCode(code) {
+            try {
+                const response = await fetch(`/portfolio/decode?code=${code}`);
+                if (!response.ok) {
+                    console.error("Failed to decode portfolio");
+                    addPeriod(); // Fallback to empty period
+                    return;
+                }
+
+                const data = await response.json();
+
+                // 1. Clear the container
+                const container = document.getElementById('periodsContainer');
+                container.innerHTML = '';
+
+                // 2. Rebuild the UI from the data
+                data.periods.forEach(period => {
+                    // Add a new period card
+                    const template = document.getElementById('periodTemplate').content.cloneNode(true);
+                    container.appendChild(template);
+
+                    const lastPeriod = container.lastElementChild;
+
+                    // Set Dates
+                    // Format to yyyy-MM-dd for HTML date input
+                    const startDate = period.startDate.split('T')[0];
+                    const endDate = period.endDate.split('T')[0];
+                    lastPeriod.querySelector('.start-date').value = startDate;
+                    lastPeriod.querySelector('.end-date').value = endDate;
+
+                    // Clear the default item added by any logic and add from data
+                    const itemsContainer = lastPeriod.querySelector('.items-container');
+                    itemsContainer.innerHTML = '';
+
+                    // Add each asset
+                    for (const [symbol, percentage] of Object.entries(period.items)) {
+                        const itemTemplate = document.getElementById('itemTemplate').content.cloneNode(true);
+                        const itemRow = itemTemplate.querySelector('.item-row');
+
+                        itemRow.querySelector('.symbol-select').value = symbol;
+                        itemRow.querySelector('.percentage-input').value = percentage;
+
+                        itemsContainer.appendChild(itemRow);
+                    }
+                });
+
+                // 3. Automatically trigger the calculation to show the graph
+                await submitPortfolio();
+
+            } catch (error) {
+                console.error("Error loading shared portfolio:", error);
+                addPeriod();
+            }
+        }
+
+        function addPeriod() {
+            const container = document.getElementById('periodsContainer');
+            const template = document.getElementById('periodTemplate').content.cloneNode(true);
+            container.appendChild(template);
+
+            // Add one default item to the new period
+            const lastPeriod = container.lastElementChild;
+            addItem(lastPeriod.querySelector('.btn-outline-info'));
+        }
+
+        function addItem(button) {
+            const container = button.previousElementSibling;
+            const template = document.getElementById('itemTemplate').content.cloneNode(true);
+            container.appendChild(template);
+        }
+
+        async function submitPortfolio() {
+            const periods = [];
+            const periodElements = document.querySelectorAll('.period-entry');
+
+            periodElements.forEach(el => {
+                const items = {};
+                el.querySelectorAll('.item-row').forEach(row => {
+                    const sym = row.querySelector('.symbol-select').value;
+                    const pct = parseFloat(row.querySelector('.percentage-input').value) || 0;
+                    items[sym] = pct;
+                });
+
+                periods.push({
+                    StartDate: el.querySelector('.start-date').value,
+                    EndDate: el.querySelector('.end-date').value,
+                    Items: items
+                });
+            });
+
+            const requestBody = { Periods: periods };
+
+            try {
+                const response = await fetch('/portfolio', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody)
+                });
+                
+                if (!response.ok) {
+                    const err = await response.text();
+                    alert("Error: " + err);
+                    return;
+                }
+
+                const data = await response.json();
+                renderResults(data);
+            } catch (error) {
+                console.error("Fetch error:", error);
+                alert("Failed to communicate with the server." +  error);
+            }
+        }
+
+        function renderResults(data) {
+            document.getElementById('resultsArea').style.display = 'block';
+            document.getElementById('polynomialOutput').innerText = data.polynomial;
+            document.getElementById('shareSection').style.display = 'block';
+
+            // Generate the URL with the share code as a query parameter
+            const shareUrl = window.location.origin + window.location.pathname + "?code=" + data.shareCode;
+            document.getElementById('shareLink').innerText = shareUrl;
+
+            const labels = data.graphData.map(d => d.month);
+            const values = data.graphData.map(d => d.wealth);
+            const values2 = data.graphDataNoSIP.map(d => d.wealth);
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+
+            const ctx = document.getElementById('wealthChart').getContext('2d');
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Wealth Growth (X=100, Y=5)',
+                        data: values,
+                        borderColor: 'rgb(75, 192, 192)',
+                        tension: 0.1,
+                        fill: true,
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)'
+                    },
+                    {
+                        label: 'Wealth Growth (X=100, Y=0)',
+                        data: values2,
+                        borderColor: 'rgb(54, 162, 235)',
+                        tension: 0.1,
+                        fill: true,
+                        backgroundColor: 'rgba(54, 162, 235, 0.2)'
+                    }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: { beginAtZero: false, title: { display: true, text: 'Wealth Units' } },
+                        x: { title: { display: true, text: 'Time' } }
+                    }
+                }
+            });
+
+            // Scroll to results
+            document.getElementById('resultsArea').scrollIntoView({ behavior: 'smooth' });
+        }
+    </script>
+}
