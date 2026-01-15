@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.WebUtilities;
 using System.Globalization;
 using System.IO;
 using System.Text.Json;
+using System.Threading.Tasks;
 using WealthTracker.Models;
 
 namespace WealthTracker.Controllers
@@ -78,6 +79,11 @@ namespace WealthTracker.Controllers
             foreach (var sym in symbols)
             {
                 priceData[sym] = LoadPricesFromCsv(sym);
+                // 20 Dec 2025 is the date of the last available data point in CSVs.
+                Task<Dictionary<DateTime, double>> task = LoadPricesFromAlphaVantageApi(sym, DateTime.Parse("2025-12-20"), DateTime.Now);
+                await task.ConfigureAwait(false);
+                Dictionary<DateTime, double> pricesFromAlphaVantageApi = task.Result;
+                priceData[sym].Concat(pricesFromAlphaVantageApi);
             }
 
             // 3. Calculation Logic
@@ -159,6 +165,52 @@ namespace WealthTracker.Controllers
             }
             // Return sorted by date
             return prices.OrderBy(kvp => kvp.Key).ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+        }
+
+        private async Task<Dictionary<DateTime, double>> LoadPricesFromAlphaVantageApi(string symbol, DateTime start, DateTime end)
+        {
+            var result = new Dictionary<DateTime, double>();
+            try
+            {
+                // Build local absolute URL to the StockController endpoint
+                var baseUrl = $"{Request.Scheme}://{Request.Host}";
+                var url = $"{baseUrl}/stock?symbol={Uri.EscapeDataString(symbol)}&start_date={start:yyyy-MM-dd}&end_date={end:yyyy-MM-dd}";
+
+                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+                var resp = await client.GetAsync(url);
+                if (!resp.IsSuccessStatusCode) return result;
+
+                var json = await resp.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+                if (!doc.RootElement.TryGetProperty("data", out var dataElement)) return result;
+                foreach (var item in dataElement.EnumerateArray())
+                {
+                    if (!item.TryGetProperty("date", out var dateProp)) continue;
+                    if (!item.TryGetProperty("close", out var closeProp)) continue;
+
+                    var dateStr = dateProp.GetString();
+                    if (string.IsNullOrWhiteSpace(dateStr)) continue;
+                    if (!DateTime.TryParse(dateStr, out var date)) continue;
+
+                    double closeValue = 0;
+                    if (closeProp.ValueKind == JsonValueKind.Number && closeProp.TryGetDouble(out var d))
+                    {
+                        closeValue = d;
+                    }
+                    else if (closeProp.ValueKind == JsonValueKind.String && double.TryParse(closeProp.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed))
+                    {
+                        closeValue = parsed;
+                    }
+
+                    result[date] = closeValue;
+                }
+            }
+            catch
+            {
+                // swallow and return empty result for fallback behavior
+            }
+
+            return result;
         }
 
         private double GetPriceOnOrBefore(DateTime date, Dictionary<DateTime, double> priceData)
