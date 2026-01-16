@@ -1,6 +1,24 @@
 ﻿@{
     ViewData["Title"] = "Portfolio Builder";
     var allowedSymbols = new[] { "NIFTYBEES", "SENSEXBEES", "FXI", "BTC", "ETH", "QQQ", "IXN", "IAU", "SLV", "DIA", "VOO", "CASH" };
+
+    // Short descriptions only for the UI dropdown. The option value remains the symbol
+    // so the API calls /portfolio and /stock still send the same symbol string.
+    var symbolDescriptions = new Dictionary<string, string>
+    {
+        ["NIFTYBEES"] = "Nifty 50 ETF (India)",
+        ["SENSEXBEES"] = "Sensex ETF (India)",
+        ["FXI"] = "iShares China Large-Cap ETF",
+        ["BTC"] = "Bitcoin (crypto)",
+        ["ETH"] = "Ethereum (crypto)",
+        ["QQQ"] = "Invesco QQQ (Nasdaq-100 ETF)",
+        ["IXN"] = "iShares Global Tech ETF",
+        ["IAU"] = "iShares Gold Trust",
+        ["SLV"] = "iShares Silver Trust",
+        ["DIA"] = "SPDR Dow Jones Industrial Average ETF",
+        ["VOO"] = "Vanguard S&P 500 ETF",
+        ["CASH"] = "Cash / Stable"
+    };
 }
 
 <div class="container mt-4">
@@ -9,6 +27,8 @@
 
     <div id="periodsContainer">
     </div>
+
+    <div id="formError" class="alert alert-danger" role="alert" style="display:none;"></div>
 
     <div class="mt-3">
         <button type="button" class="btn btn-secondary" onclick="addPeriod()">+ Add Period</button>
@@ -59,7 +79,8 @@
             <select class="form-control symbol-select">
                 @foreach (var sym in allowedSymbols)
                 {
-                    <option value="@sym">@sym</option>
+                    var desc = symbolDescriptions.ContainsKey(sym) ? symbolDescriptions[sym] : string.Empty;
+                    <option value="@sym" data-desc="@desc">@sym@if(!string.IsNullOrEmpty(desc)){<text> - @desc</text>}</option>
                 }
             </select>
         </div>
@@ -164,24 +185,74 @@
             container.appendChild(template);
         }
 
+        function showFormError(message) {
+            const err = document.getElementById('formError');
+            err.innerText = message;
+            err.style.display = 'block';
+            // scroll into view so user sees it
+            err.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        function clearFormError() {
+            const err = document.getElementById('formError');
+            err.innerText = '';
+            err.style.display = 'none';
+        }
+
         async function submitPortfolio() {
+            clearFormError();
+
             const periods = [];
             const periodElements = document.querySelectorAll('.period-entry');
 
-            periodElements.forEach(el => {
+            // Client-side validation to give clean, user-friendly messages
+            for (let i = 0; i < periodElements.length; i++) {
+                const el = periodElements[i];
+                const startVal = el.querySelector('.start-date').value;
+                const endVal = el.querySelector('.end-date').value;
+
+                if (!startVal || !endVal) {
+                    showFormError(`Please fill both Start Date and End Date for period #${i + 1}.`);
+                    return;
+                }
+
+                const startDate = new Date(startVal);
+                const endDate = new Date(endVal);
+                if (isNaN(startDate) || isNaN(endDate)) {
+                    showFormError(`Invalid date format for period #${i + 1}. Use yyyy-mm-dd.`);
+                    return;
+                }
+
+                if (startDate > endDate) {
+                    showFormError(`Start Date must be on or before End Date for period #${i + 1}.`);
+                    return;
+                }
+
                 const items = {};
+                let pctSum = 0;
                 el.querySelectorAll('.item-row').forEach(row => {
                     const sym = row.querySelector('.symbol-select').value;
                     const pct = parseFloat(row.querySelector('.percentage-input').value) || 0;
                     items[sym] = pct;
+                    pctSum += pct;
                 });
 
+                if (Math.abs(pctSum - 100) > 0.01) {
+                    showFormError(`Percentages in period #${i + 1} must sum to 100%. Current sum: ${pctSum.toFixed(2)}%.`);
+                    return;
+                }
+
                 periods.push({
-                    StartDate: el.querySelector('.start-date').value,
-                    EndDate: el.querySelector('.end-date').value,
+                    StartDate: startVal,
+                    EndDate: endVal,
                     Items: items
                 });
-            });
+            }
+
+            if (!periods.length) {
+                showFormError("Add at least one period before calculating.");
+                return;
+            }
 
             const requestBody = { Periods: periods };
 
@@ -191,10 +262,29 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(requestBody)
                 });
-                
+
                 if (!response.ok) {
-                    const err = await response.text();
-                    alert("Error: " + err);
+                    // Try to parse problem details / validation errors and surface a clean message
+                    let text;
+                    try {
+                        const payload = await response.json();
+                        // If this is ProblemDetails with validation errors
+                        if (payload && payload.errors) {
+                            const messages = [];
+                            for (const [field, vals] of Object.entries(payload.errors)) {
+                                messages.push(`${field}: ${Array.isArray(vals) ? vals.join(' ') : vals}`);
+                            }
+                            text = messages.join('\n');
+                        } else if (payload && payload.title) {
+                            text = payload.title;
+                        } else {
+                            text = JSON.stringify(payload);
+                        }
+                    } catch (e) {
+                        text = await response.text();
+                    }
+
+                    showFormError(`Server error: ${text}`);
                     return;
                 }
 
@@ -202,7 +292,7 @@
                 renderResults(data);
             } catch (error) {
                 console.error("Fetch error:", error);
-                alert("Failed to communicate with the server." +  error);
+                showFormError("Failed to communicate with the server. Check your network connection and try again.");
             }
         }
 

@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Threading.Tasks;
+using System.Linq;
 using WealthTracker.Models;
 
 namespace WealthTracker.Controllers
@@ -78,12 +79,38 @@ namespace WealthTracker.Controllers
 
             foreach (var sym in symbols)
             {
-                priceData[sym] = LoadPricesFromCsv(sym);
-                // 20 Dec 2025 is the date of the last available data point in CSVs.
-                Task<Dictionary<DateTime, double>> task = LoadPricesFromAlphaVantageApi(sym, DateTime.Parse("2025-12-20"), DateTime.Now);
-                await task.ConfigureAwait(false);
-                Dictionary<DateTime, double> pricesFromAlphaVantageApi = task.Result;
-                priceData[sym].Concat(pricesFromAlphaVantageApi);
+                // Start with whatever is present in CSV (may be empty)
+                var csvPrices = LoadPricesFromCsv(sym) ?? new Dictionary<DateTime, double>();
+                var combined = new Dictionary<DateTime, double>(csvPrices);
+
+                if (!string.Equals(sym, "CASH", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Call AlphaVantage endpoint for additional dates only when symbol is NOT CASH
+                    var apiPrices = await LoadPricesFromAlphaVantageApi(sym, DateTime.Parse("2025-12-20"), DateTime.Now).ConfigureAwait(false);
+                    if (apiPrices != null)
+                    {
+                        // Merge API prices, but prefer CSV values for overlapping dates
+                        foreach (var kvp in apiPrices)
+                        {
+                            if (!combined.ContainsKey(kvp.Key))
+                                combined[kvp.Key] = kvp.Value;
+                        }
+                    }
+                }
+                else
+                {
+                    // CASH: fill with fixed value 100.0 for all dates from 2025-12-20 through today
+                    var start = DateTime.Parse("2025-12-20");
+                    var end = DateTime.Today;
+                    for (var d = start; d <= end; d = d.AddDays(1))
+                    {
+                        if (!combined.ContainsKey(d))
+                            combined[d] = 100.0;
+                    }
+                }
+
+                // Ensure data is sorted by date
+                priceData[sym] = combined.OrderBy(kvp => kvp.Key).ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
             }
 
             // 3. Calculation Logic
