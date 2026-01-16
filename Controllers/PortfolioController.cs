@@ -1,10 +1,14 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.Caching.Memory;
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
-using System.Linq;
 using WealthTracker.Models;
 
 namespace WealthTracker.Controllers
@@ -16,7 +20,13 @@ namespace WealthTracker.Controllers
         private readonly string _csvPath = Path.Combine(Directory.GetCurrentDirectory(), "Data"); // Path where CSVs are stored
         private readonly DateTime _minDate = new DateTime(1990, 01, 01);
         private readonly DateTime _maxDate = DateTime.Today;
-        Dictionary<string, DateTime> _oldestDataCache = new Dictionary<string, DateTime>();
+        private readonly IMemoryCache _memoryCache;
+        private readonly ConcurrentDictionary<string, DateTime> _oldestDataCache = new ConcurrentDictionary<string, DateTime>();
+
+        public PortfolioController(IMemoryCache memoryCache)
+        {
+            _memoryCache = memoryCache ?? throw new ArgumentNullException(nameof(memoryCache));
+        }
 
         [HttpGet("decode")]
         public IActionResult Decode([FromQuery] string code)
@@ -46,8 +56,8 @@ namespace WealthTracker.Controllers
                 string symbol = string.Empty;
                 foreach (var key in p.Items.Keys.ToList())
                 {
-                    var currentOldDate = GetOldestDate(key);
-                    if(currentOldDate > currentLowestStartTime)
+                    var currentOldDate = await GetOldestDateAsync(key).ConfigureAwait(false);
+                    if (currentOldDate > currentLowestStartTime)
                     {
                         symbol = key;
                         currentLowestStartTime = currentOldDate;
@@ -73,44 +83,15 @@ namespace WealthTracker.Controllers
             }
 
             // 2. Load and Process Data
-            // Optimization: Load only necessary CSVs into memory
+            // Optimization: Load only necessary CSVs into memory and cache results to reuse across API calls
             var symbols = request.Periods.SelectMany(p => p.Items.Keys).Distinct();
             var priceData = new Dictionary<string, Dictionary<DateTime, double>>();
 
             foreach (var sym in symbols)
             {
-                // Start with whatever is present in CSV (may be empty)
-                var csvPrices = LoadPricesFromCsv(sym) ?? new Dictionary<DateTime, double>();
-                var combined = new Dictionary<DateTime, double>(csvPrices);
-
-                if (!string.Equals(sym, "CASH", StringComparison.OrdinalIgnoreCase))
-                {
-                    // Call AlphaVantage endpoint for additional dates only when symbol is NOT CASH
-                    var apiPrices = await LoadPricesFromAlphaVantageApi(sym, DateTime.Parse("2025-12-20"), DateTime.Now).ConfigureAwait(false);
-                    if (apiPrices != null)
-                    {
-                        // Merge API prices, but prefer CSV values for overlapping dates
-                        foreach (var kvp in apiPrices)
-                        {
-                            if (!combined.ContainsKey(kvp.Key))
-                                combined[kvp.Key] = kvp.Value;
-                        }
-                    }
-                }
-                else
-                {
-                    // CASH: fill with fixed value 100.0 for all dates from 2025-12-20 through today
-                    var start = DateTime.Parse("2025-12-20");
-                    var end = DateTime.Today;
-                    for (var d = start; d <= end; d = d.AddDays(1))
-                    {
-                        if (!combined.ContainsKey(d))
-                            combined[d] = 100.0;
-                    }
-                }
-
-                // Ensure data is sorted by date
-                priceData[sym] = combined.OrderBy(kvp => kvp.Key).ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+                // Use cached/computed price data; GetOrLoadPriceDataAsync will load CSV + API once and cache result
+                var combined = await GetOrLoadPriceDataAsync(sym).ConfigureAwait(false);
+                priceData[sym] = combined;
             }
 
             // 3. Calculation Logic
@@ -159,6 +140,77 @@ namespace WealthTracker.Controllers
             });
         }
 
+        // Cache-aware loader: reads CSV, determines last CSV date (if any), requests only new dates from API, then caches the sorted dictionary
+        private async Task<Dictionary<DateTime, double>> GetOrLoadPriceDataAsync(string symbol)
+        {
+            if (string.IsNullOrEmpty(symbol)) return new Dictionary<DateTime, double>();
+
+            var cacheKey = $"PriceData_{symbol.ToUpperInvariant()}";
+
+#pragma warning disable CS8603 // Possible null reference return.
+            return await _memoryCache.GetOrCreateAsync(cacheKey, async entry =>
+            {
+                // Tune expiration as needed; absolute expiration here prevents stale long-term caching
+                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(12);
+
+                var csvPrices = LoadPricesFromCsv(symbol) ?? new Dictionary<DateTime, double>();
+                var combined = new Dictionary<DateTime, double>(csvPrices);
+
+                // Determine start date for refresh: one day after the last date present in CSV (if any)
+                DateTime refreshStart;
+                if (csvPrices.Any())
+                {
+                    refreshStart = csvPrices.Keys.Max().AddDays(1);
+                }
+                else
+                {
+                    // If CSV has no data, don't request a huge historical range.
+                    // Use _minDate to allow full history, or choose DateTime.Today to only check today's price.
+                    // Here we default to _minDate to preserve previous behavior if desired.
+                    refreshStart = _minDate;
+                }
+
+                var refreshEnd = DateTime.Today;
+
+                if (!string.Equals(symbol, "CASH", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Call AlphaVantage endpoint for additional dates only when symbol is NOT CASH
+                    // Only call the API if there's a valid range to request
+                    if (refreshStart <= refreshEnd)
+                    {
+                        var apiPrices = await LoadPricesFromAlphaVantageApi(symbol, refreshStart, refreshEnd).ConfigureAwait(false);
+                        if (apiPrices != null)
+                        {
+                            // Merge API prices, but prefer CSV values for overlapping dates
+                            foreach (var kvp in apiPrices)
+                            {
+                                if (!combined.ContainsKey(kvp.Key))
+                                    combined[kvp.Key] = kvp.Value;
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    // CASH: fill with fixed value 100.0 for all dates starting one day after CSV last date through today
+                    var start = refreshStart;
+                    var end = refreshEnd;
+                    if (start <= end)
+                    {
+                        for (var d = start; d <= end; d = d.AddDays(1))
+                        {
+                            if (!combined.ContainsKey(d))
+                                combined[d] = 100.0;
+                        }
+                    }
+                }
+
+                // Ensure data is sorted by date
+                return combined.OrderBy(kvp => kvp.Key).ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+            }).ConfigureAwait(false);
+#pragma warning restore CS8603 // Possible null reference return.
+        }
+
         private Dictionary<DateTime, double> LoadPricesFromCsv(string symbol)
         {
             var prices = new Dictionary<DateTime, double>();
@@ -203,11 +255,11 @@ namespace WealthTracker.Controllers
                 var baseUrl = $"{Request.Scheme}://{Request.Host}";
                 var url = $"{baseUrl}/stock?symbol={Uri.EscapeDataString(symbol)}&start_date={start:yyyy-MM-dd}&end_date={end:yyyy-MM-dd}";
 
-                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-                var resp = await client.GetAsync(url);
+                using var client = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+                var resp = await client.GetAsync(url).ConfigureAwait(false);
                 if (!resp.IsSuccessStatusCode) return result;
 
-                var json = await resp.Content.ReadAsStringAsync();
+                var json = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
                 using var doc = JsonDocument.Parse(json);
                 if (!doc.RootElement.TryGetProperty("data", out var dataElement)) return result;
                 foreach (var item in dataElement.EnumerateArray())
@@ -422,15 +474,23 @@ namespace WealthTracker.Controllers
             }
         }
 
-        private DateTime GetOldestDate(string symbol)
+        private async Task<DateTime> GetOldestDateAsync(string symbol)
         {
-            if (!string.IsNullOrEmpty(symbol) && _oldestDataCache.ContainsKey(symbol))
+            if (!string.IsNullOrEmpty(symbol) && _oldestDataCache.TryGetValue(symbol, out var cached))
             {
-                return _oldestDataCache[symbol];
+                return cached;
             }
-            var prices = LoadPricesFromCsv(symbol);
-            _oldestDataCache[symbol] = prices.Keys.Min();
-            return prices.Keys.Min();
+
+            var prices = await GetOrLoadPriceDataAsync(symbol).ConfigureAwait(false);
+            if (prices == null || !prices.Any())
+            {
+                // No data available — return MinValue so callers can handle absence safely
+                return DateTime.MinValue;
+            }
+
+            var oldest = prices.Keys.Min();
+            _oldestDataCache[symbol] = oldest;
+            return oldest;
         }
     }
 }

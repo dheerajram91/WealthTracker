@@ -264,32 +264,13 @@
                 });
 
                 if (!response.ok) {
-                    // Try to parse problem details / validation errors and surface a clean message
-                    let text;
-                    try {
-                        const payload = await response.json();
-                        // If this is ProblemDetails with validation errors
-                        if (payload && payload.errors) {
-                            const messages = [];
-                            for (const [field, vals] of Object.entries(payload.errors)) {
-                                messages.push(`${field}: ${Array.isArray(vals) ? vals.join(' ') : vals}`);
-                            }
-                            text = messages.join('\n');
-                        } else if (payload && payload.title) {
-                            text = payload.title;
-                        } else {
-                            text = JSON.stringify(payload);
-                        }
-                    } catch (e) {
-                        text = await response.text();
-                    }
-
-                    showFormError(`Server error: ${text}`);
+                    const err = await response.text();
+                    alert("Error: " + err);
                     return;
                 }
 
-                const data = await response.json();
-                renderResults(data);
+                var textData = await response.json();
+                renderResults(textData);
             } catch (error) {
                 console.error("Fetch error:", error);
                 showFormError("Failed to communicate with the server. Check your network connection and try again.");
