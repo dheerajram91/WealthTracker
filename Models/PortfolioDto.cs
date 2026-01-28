@@ -35,4 +35,25 @@
 
         public string ShareCode { get; set; }
     }
+
+    public class CompareRequest
+    {
+        public List<CompareItem>? CompareItems { get; set; }
+    }
+
+    public class CompareItem
+    {
+        public Dictionary<string, double>? Portfolio { get; set; }
+    }
+
+    public class CompareResult
+    {
+        public string? Id { get; set; }
+        public string? Message { get; set; }
+        public double CoefficientA { get; set; }
+        public double CoefficientB { get; set; }
+        public List<MonthlyWealthPoint> GraphData { get; set; } = new();
+        public List<MonthlyWealthPoint> GraphDataNoSIP { get; set; } = new();
+    }
+
 }
