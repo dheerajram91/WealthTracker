@@ -9,6 +9,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using WealthTracker.Helper;
 using WealthTracker.Models;
 
 namespace WealthTracker.Controllers
@@ -20,12 +21,10 @@ namespace WealthTracker.Controllers
         private readonly string _csvPath = Path.Combine(Directory.GetCurrentDirectory(), "Data"); // Path where CSVs are stored
         private readonly DateTime _minDate = new DateTime(1990, 01, 01);
         private readonly DateTime _maxDate = DateTime.Today;
-        private readonly IMemoryCache _memoryCache;
-        private readonly ConcurrentDictionary<string, DateTime> _oldestDataCache = new ConcurrentDictionary<string, DateTime>();
+        private readonly DataProcessHelper _dataHelper;
 
-        public PortfolioController(IMemoryCache memoryCache)
-        {
-            _memoryCache = memoryCache ?? throw new ArgumentNullException(nameof(memoryCache));
+        public PortfolioController(DataProcessHelper dataHelper) {
+            _dataHelper = dataHelper;
         }
 
         [HttpGet("decode")]
@@ -42,6 +41,8 @@ namespace WealthTracker.Controllers
         [HttpPost]
         public async Task<IActionResult> CalculatePortfolio([FromBody] PortfolioRequest request)
         {
+            var baseUrl = $"{Request.Scheme}://{Request.Host}";
+            DataProcessHelper.Initialize(_csvPath, baseUrl);
             // 1. Validation
             if (request.Periods == null || !request.Periods.Any())
                 return BadRequest("Periods are required.");
@@ -56,7 +57,7 @@ namespace WealthTracker.Controllers
                 string symbol = string.Empty;
                 foreach (var key in p.Items.Keys.ToList())
                 {
-                    var currentOldDate = await GetOldestDateAsync(key).ConfigureAwait(false);
+                    var currentOldDate = await _dataHelper.GetOldestDateAsync(key).ConfigureAwait(false);
                     if (currentOldDate > currentLowestStartTime)
                     {
                         symbol = key;
@@ -90,7 +91,7 @@ namespace WealthTracker.Controllers
             foreach (var sym in symbols)
             {
                 // Use cached/computed price data; GetOrLoadPriceDataAsync will load CSV + API once and cache result
-                var combined = await GetOrLoadPriceDataAsync(sym).ConfigureAwait(false);
+                var combined = await _dataHelper.GetOrLoadPriceDataAsync(sym).ConfigureAwait(false);
                 priceData[sym] = combined;
             }
 
@@ -102,7 +103,7 @@ namespace WealthTracker.Controllers
             var endOfSeries = sortedPeriods.Last().EndDate;
 
             // Define Monthly Investment Dates (1st of every month within range)
-            var monthlyDates = GetMonthlyDates(startOfSeries, endOfSeries);
+            var monthlyDates = _dataHelper.GetMonthlyDates(startOfSeries, endOfSeries);
 
             // Calculate Wealth Growth Monthly (X=100, Y=5 for graph1 and X=100, Y=0 for graph2)
             var graphData = new List<MonthlyWealthPoint>();
@@ -140,185 +141,6 @@ namespace WealthTracker.Controllers
             });
         }
 
-        // Cache-aware loader: reads CSV, determines last CSV date (if any), requests only new dates from API, then caches the sorted dictionary
-        private async Task<Dictionary<DateTime, double>> GetOrLoadPriceDataAsync(string symbol)
-        {
-            if (string.IsNullOrEmpty(symbol)) return new Dictionary<DateTime, double>();
-
-            var cacheKey = $"PriceData_{symbol.ToUpperInvariant()}";
-
-#pragma warning disable CS8603 // Possible null reference return.
-            return await _memoryCache.GetOrCreateAsync(cacheKey, async entry =>
-            {
-                // Tune expiration as needed; absolute expiration here prevents stale long-term caching
-                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(12);
-
-                var csvPrices = LoadPricesFromCsv(symbol) ?? new Dictionary<DateTime, double>();
-                var combined = new Dictionary<DateTime, double>(csvPrices);
-
-                // Determine start date for refresh: one day after the last date present in CSV (if any)
-                DateTime refreshStart;
-                if (csvPrices.Any())
-                {
-                    refreshStart = csvPrices.Keys.Max().AddDays(1);
-                }
-                else
-                {
-                    // If CSV has no data, don't request a huge historical range.
-                    // Use _minDate to allow full history, or choose DateTime.Today to only check today's price.
-                    // Here we default to _minDate to preserve previous behavior if desired.
-                    refreshStart = _minDate;
-                }
-
-                var refreshEnd = DateTime.Today;
-
-                if (!string.Equals(symbol, "CASH", StringComparison.OrdinalIgnoreCase))
-                {
-                    // Call AlphaVantage endpoint for additional dates only when symbol is NOT CASH
-                    // Only call the API if there's a valid range to request
-                    if (refreshStart <= refreshEnd)
-                    {
-                        var apiPrices = await LoadPricesFromAlphaVantageApi(symbol, refreshStart, refreshEnd).ConfigureAwait(false);
-                        if (apiPrices != null)
-                        {
-                            // Merge API prices, but prefer CSV values for overlapping dates
-                            foreach (var kvp in apiPrices)
-                            {
-                                if (!combined.ContainsKey(kvp.Key))
-                                    combined[kvp.Key] = kvp.Value;
-                            }
-                        }
-                    }
-                }
-                else
-                {
-                    // CASH: fill with fixed value 100.0 for all dates starting one day after CSV last date through today
-                    var start = refreshStart;
-                    var end = refreshEnd;
-                    if (start <= end)
-                    {
-                        for (var d = start; d <= end; d = d.AddDays(1))
-                        {
-                            if (!combined.ContainsKey(d))
-                                combined[d] = 100.0;
-                        }
-                    }
-                }
-
-                // Ensure data is sorted by date
-                return combined.OrderBy(kvp => kvp.Key).ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
-            }).ConfigureAwait(false);
-#pragma warning restore CS8603 // Possible null reference return.
-        }
-
-        private Dictionary<DateTime, double> LoadPricesFromCsv(string symbol)
-        {
-            var prices = new Dictionary<DateTime, double>();
-            var filePath = Path.Combine(_csvPath, $"{symbol}.csv");
-
-            if (!System.IO.File.Exists(filePath)) return prices;
-
-            using (var reader = new StreamReader(filePath))
-            {
-                // Skip header
-                reader.ReadLine();
-                while (!reader.EndOfStream)
-                {
-                    var line = reader.ReadLine();
-                    if (string.IsNullOrWhiteSpace(line)) continue;
-
-                    // Handle quoted dates like "Dec 27, 2025"
-                    var parts = line.Split(new[] { "\",", "," }, StringSplitOptions.None);
-                    string dateStr_1 = parts[0].Trim('"');
-                    string dateStr_2 = parts[1];
-                    string dateStr = dateStr_1 + "," + dateStr_2;
-                    if (DateTime.TryParseExact(dateStr, "MMM dd, yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime date))
-                    {
-                        // parts[5] is the 'Close' price
-                        if (double.TryParse(parts[5], out double closePrice))
-                        {
-                            prices[date] = closePrice;
-                        }
-                    }
-                }
-            }
-            // Return sorted by date
-            return prices.OrderBy(kvp => kvp.Key).ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
-        }
-
-        private async Task<Dictionary<DateTime, double>> LoadPricesFromAlphaVantageApi(string symbol, DateTime start, DateTime end)
-        {
-            var result = new Dictionary<DateTime, double>();
-            try
-            {
-                // Build local absolute URL to the StockController endpoint
-                var baseUrl = $"{Request.Scheme}://{Request.Host}";
-                var url = $"{baseUrl}/stock?symbol={Uri.EscapeDataString(symbol)}&start_date={start:yyyy-MM-dd}&end_date={end:yyyy-MM-dd}";
-
-                using var client = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-                var resp = await client.GetAsync(url).ConfigureAwait(false);
-                if (!resp.IsSuccessStatusCode) return result;
-
-                var json = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
-                using var doc = JsonDocument.Parse(json);
-                if (!doc.RootElement.TryGetProperty("data", out var dataElement)) return result;
-                foreach (var item in dataElement.EnumerateArray())
-                {
-                    if (!item.TryGetProperty("date", out var dateProp)) continue;
-                    if (!item.TryGetProperty("close", out var closeProp)) continue;
-
-                    var dateStr = dateProp.GetString();
-                    if (string.IsNullOrWhiteSpace(dateStr)) continue;
-                    if (!DateTime.TryParse(dateStr, out var date)) continue;
-
-                    double closeValue = 0;
-                    if (closeProp.ValueKind == JsonValueKind.Number && closeProp.TryGetDouble(out var d))
-                    {
-                        closeValue = d;
-                    }
-                    else if (closeProp.ValueKind == JsonValueKind.String && double.TryParse(closeProp.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed))
-                    {
-                        closeValue = parsed;
-                    }
-
-                    result[date] = closeValue;
-                }
-            }
-            catch
-            {
-                // swallow and return empty result for fallback behavior
-            }
-
-            return result;
-        }
-
-        private double GetPriceOnOrBefore(DateTime date, Dictionary<DateTime, double> priceData)
-        {
-            // If exact date exists, return it
-            if (priceData.TryGetValue(date, out double price)) return price;
-
-            // Otherwise, find the latest price before this date (handling weekends/holidays)
-            var previousDates = priceData.Keys.Where(d => d < date);
-            if (!previousDates.Any()) return priceData.First().Value;
-
-            return priceData[previousDates.Max()];
-        }
-
-        private List<DateTime> GetMonthlyDates(DateTime start, DateTime end)
-        {
-            var dates = new List<DateTime>();
-            // Start at the first month-start on or after start date
-            DateTime current = new DateTime(start.Year, start.Month, 1);
-            if (current < start) current = current.AddMonths(1);
-
-            while (current <= end)
-            {
-                dates.Add(current);
-                current = current.AddMonths(1);
-            }
-            return dates;
-        }
-
         private (double a, double b, List<MonthlyWealthPoint> graphData, List<MonthlyWealthPoint> graphDataNoSIP) RunSimulation(
             List<PortfolioPeriod> periods,
             Dictionary<string, Dictionary<DateTime, double>> allPriceData,
@@ -327,7 +149,7 @@ namespace WealthTracker.Controllers
         {
             var startOfSeries = periods.First().StartDate;
             var endOfSeries = periods.Last().EndDate;
-            var monthlyDates = GetMonthlyDates(startOfSeries, endOfSeries);
+            var monthlyDates = _dataHelper.GetMonthlyDates(startOfSeries, endOfSeries);
 
             // Track three variables:
             double coeffA = 1.0; // Growth of the initial $1
@@ -395,8 +217,8 @@ namespace WealthTracker.Controllers
 
                 if (allPriceData.ContainsKey(symbol))
                 {
-                    double priceStart = GetPriceOnOrBefore(start, allPriceData[symbol]);
-                    double priceEnd = GetPriceOnOrBefore(end, allPriceData[symbol]);
+                    double priceStart = _dataHelper.GetPriceOnOrBefore(start, allPriceData[symbol]);
+                    double priceEnd = _dataHelper.GetPriceOnOrBefore(end, allPriceData[symbol]);
 
                     double assetReturn = priceEnd / priceStart;
                     totalReturn += (assetReturn * weight);
@@ -426,8 +248,8 @@ namespace WealthTracker.Controllers
                 if (priceData.TryGetValue(symbol, out var individualAssetPrices))
                 {
                     // Get prices using the 'OnOrBefore' helper to handle weekends/holidays
-                    double priceAtStart = GetPriceOnOrBefore(startDate, individualAssetPrices);
-                    double priceAtEnd = GetPriceOnOrBefore(endDate, individualAssetPrices);
+                    double priceAtStart = _dataHelper.GetPriceOnOrBefore(startDate, individualAssetPrices);
+                    double priceAtEnd = _dataHelper.GetPriceOnOrBefore(endDate, individualAssetPrices);
 
                     // growth = PriceEnd / PriceStart
                     double assetGrowthFactor = priceAtEnd / priceAtStart;
@@ -466,31 +288,14 @@ namespace WealthTracker.Controllers
             {
                 byte[] bytes = WebEncoders.Base64UrlDecode(code);
                 string json = System.Text.Encoding.UTF8.GetString(bytes);
+#pragma warning disable CS8603 // Possible null reference return.
                 return JsonSerializer.Deserialize<PortfolioRequest>(json);
+#pragma warning restore CS8603 // Possible null reference return.
             }
             catch
             {
                 return null;
             }
-        }
-
-        private async Task<DateTime> GetOldestDateAsync(string symbol)
-        {
-            if (!string.IsNullOrEmpty(symbol) && _oldestDataCache.TryGetValue(symbol, out var cached))
-            {
-                return cached;
-            }
-
-            var prices = await GetOrLoadPriceDataAsync(symbol).ConfigureAwait(false);
-            if (prices == null || !prices.Any())
-            {
-                // No data available — return MinValue so callers can handle absence safely
-                return DateTime.MinValue;
-            }
-
-            var oldest = prices.Keys.Min();
-            _oldestDataCache[symbol] = oldest;
-            return oldest;
         }
     }
 }

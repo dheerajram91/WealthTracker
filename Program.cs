@@ -1,9 +1,22 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
+using WealthTracker.Helper;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddControllersWithViews();
+builder.Services.AddMemoryCache();
+
+// Register DataProcessHelper as a singleton and assign the same instance to the static Instance.
+// This guarantees all controllers (DI or static access) use the same object and shared cache.
+builder.Services.AddSingleton<DataProcessHelper>(sp =>
+{
+    var mem = sp.GetRequiredService<IMemoryCache>();
+    var helper = new DataProcessHelper(mem);
+    DataProcessHelper.Instance = helper;
+    return helper;
+});
 
 var app = builder.Build();
 
