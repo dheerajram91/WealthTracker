@@ -112,15 +112,19 @@ namespace WealthTracker.Controllers
             double currentXGrowth = 1.0;
             var yInvestments = new List<(DateTime Date, double Multiplier)>();
 
+            // Create ComputeHelper once and reuse it (also used later for final simulation)
+            ComputeHelper compHelper = new ComputeHelper(_dataHelper);
+
             foreach (var date in monthlyDates)
             {
                 // Update growth factor for X and existing Ys for the month
                 var period = sortedPeriods.FirstOrDefault(p => date >= p.StartDate && date <= p.EndDate);
                 if (period == null) continue;
 
-                // Simple Monthly Portfolio Return: Sum(weight_i * (Price_end_of_month / Price_start_of_month))
-                // For simplicity in this logic, we calculate daily/monthly growth
-                double monthlyReturn = CalculatePortfolioReturn(date, date.AddMonths(1).AddDays(-1), period.Items, priceData);
+                // Convert single period dictionary into a List<PortfolioPeriod> as required by ComputeHelper.GetPortfolioReturn
+                var singlePeriodList = new List<PortfolioPeriod> { period };
+
+                double monthlyReturn = compHelper.GetPortfolioReturn(date, date.AddMonths(1).AddDays(-1), singlePeriodList, priceData);
             }
 
             // Simplified Result based on simulation:
@@ -128,7 +132,7 @@ namespace WealthTracker.Controllers
             // Coefficient B: Sum of final values of 1 unit invested every month
 
             // Perform final simulation to get a and b
-            (a, b, graphData, graphDataNoSIP) = RunSimulation(sortedPeriods, priceData, 100, 5);
+            (a, b, graphData, graphDataNoSIP) = compHelper.RunSimulation(sortedPeriods, priceData, 100, 5);
 
             return Ok(new PortfolioResponse
             {
@@ -139,133 +143,6 @@ namespace WealthTracker.Controllers
                 GraphDataNoSIP = graphDataNoSIP,
                 ShareCode = EncodeRequest(request)
             });
-        }
-
-        private (double a, double b, List<MonthlyWealthPoint> graphData, List<MonthlyWealthPoint> graphDataNoSIP) RunSimulation(
-            List<PortfolioPeriod> periods,
-            Dictionary<string, Dictionary<DateTime, double>> allPriceData,
-            double graphX,
-            double graphY)
-        {
-            var startOfSeries = periods.First().StartDate;
-            var endOfSeries = periods.Last().EndDate;
-            var monthlyDates = _dataHelper.GetMonthlyDates(startOfSeries, endOfSeries);
-
-            // Track three variables:
-            double coeffA = 1.0; // Growth of the initial $1
-            double coeffB = 0.0; // Growth of the monthly $1 investments
-            var graphPoints = new List<MonthlyWealthPoint>();
-            var graphPoints_no_SIP = new List<MonthlyWealthPoint>();
-
-            DateTime lastCheckDate = startOfSeries;
-
-            foreach (var currentDate in monthlyDates)
-            {
-                // 1. Calculate return from lastCheckDate to currentDate
-                double periodReturn = GetPortfolioReturn(lastCheckDate, currentDate, periods, allPriceData);
-
-                // 2. Grow existing values
-                coeffA *= periodReturn;
-                coeffB *= periodReturn;
-
-                // 3. Inject new monthly investment for coeffB (the $1)
-                coeffB += 1.0;
-
-                // 4. Calculate current wealth for the graph (X=100, Y=5)
-                double currentWealth = (graphX * coeffA) + (graphY * coeffB);
-                graphPoints.Add(new MonthlyWealthPoint
-                {
-                    Month = currentDate.ToString("MMM yyyy"),
-                    Wealth = Math.Round(currentWealth, 2)
-                });
-
-                // 4. Calculate current wealth for the graph (X=100, Y=0)
-                currentWealth = (graphX * coeffA);
-                graphPoints_no_SIP.Add(new MonthlyWealthPoint
-                {
-                    Month = currentDate.ToString("MMM yyyy"),
-                    Wealth = Math.Round(currentWealth, 2)
-                });
-                lastCheckDate = currentDate;
-            }
-
-            // Finally, grow from the last monthly date to the absolute EndDate
-            double finalReturn = GetPortfolioReturn(lastCheckDate, endOfSeries, periods, allPriceData);
-            coeffA *= finalReturn;
-            coeffB *= finalReturn;
-
-            return (coeffA, coeffB, graphPoints, graphPoints_no_SIP);
-        }
-
-        private double GetPortfolioReturn(
-            DateTime start,
-            DateTime end,
-            List<PortfolioPeriod> periods,
-            Dictionary<string, Dictionary<DateTime, double>> allPriceData)
-        {
-            // Find the weight definition for this date range
-            // (Simplification: Use the period valid at the 'start' date)
-            var period = periods.FirstOrDefault(p => start >= p.StartDate && start <= p.EndDate)
-                         ?? periods.First();
-
-            double totalReturn = 0;
-
-            foreach (var item in period.Items)
-            {
-                string symbol = item.Key;
-                double weight = item.Value / 100.0;
-
-                if (allPriceData.ContainsKey(symbol))
-                {
-                    double priceStart = _dataHelper.GetPriceOnOrBefore(start, allPriceData[symbol]);
-                    double priceEnd = _dataHelper.GetPriceOnOrBefore(end, allPriceData[symbol]);
-
-                    double assetReturn = priceEnd / priceStart;
-                    totalReturn += (assetReturn * weight);
-                }
-            }
-
-            return totalReturn;
-        }
-
-        /// <summary>
-        /// Calculates the weighted growth factor for the portfolio between two dates.
-        /// A result of 1.05 means a 5% gain.
-        /// </summary>
-        private double CalculatePortfolioReturn(
-            DateTime startDate,
-            DateTime endDate,
-            Dictionary<string, double> weights,
-            Dictionary<string, Dictionary<DateTime, double>> priceData)
-        {
-            double totalPortfolioGrowthFactor = 0;
-
-            foreach (var item in weights)
-            {
-                string symbol = item.Key;
-                double weightPercentage = item.Value / 100.0; // Convert 20% to 0.2
-
-                if (priceData.TryGetValue(symbol, out var individualAssetPrices))
-                {
-                    // Get prices using the 'OnOrBefore' helper to handle weekends/holidays
-                    double priceAtStart = _dataHelper.GetPriceOnOrBefore(startDate, individualAssetPrices);
-                    double priceAtEnd = _dataHelper.GetPriceOnOrBefore(endDate, individualAssetPrices);
-
-                    // growth = PriceEnd / PriceStart
-                    double assetGrowthFactor = priceAtEnd / priceAtStart;
-
-                    // Add weighted contribution to the portfolio
-                    totalPortfolioGrowthFactor += (assetGrowthFactor * weightPercentage);
-                }
-                else
-                {
-                    // If data for a symbol is missing, assume no growth (1.0) 
-                    // or handle as an error based on your requirements.
-                    totalPortfolioGrowthFactor += (1.0 * weightPercentage);
-                }
-            }
-
-            return totalPortfolioGrowthFactor;
         }
 
         // Converts the input object to a unique alphanumeric string

@@ -39,6 +39,17 @@
         <h4>Comparison Results</h4>
         <p><strong>Period:</strong> <span id="periodRange"></span></p>
 
+        <!-- Toggle slider between SIP and NO SIP -->
+        <div class="mb-2 d-flex align-items-center">
+            <span id="noSipLabel" class="me-2">NO SIP</span>
+
+            <div class="form-check form-switch mx-2">
+                <input class="form-check-input" type="checkbox" id="sipToggle" checked onchange="onSIPToggle(this.checked)" role="switch" aria-checked="true" aria-label="Toggle SIP mode">
+            </div>
+
+            <span id="sipLabel" class="ms-2 fw-bold">SIP</span>
+        </div>
+
         <div id="coefficients" class="mb-3"></div>
 
         <div class="card">
@@ -87,6 +98,8 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
         let chartInstance = null;
+        let latestResults = null; // stored server response results array
+        let currentMode = 'SIP'; // 'SIP' or 'NO_SIP'
         const palette = [
             'rgb(75, 192, 192)',
             'rgb(54, 162, 235)',
@@ -100,6 +113,10 @@
         document.addEventListener("DOMContentLoaded", () => {
             addStrategy();
             addStrategy(); // pre-add two strategies for convenience
+
+            // initialize label styling according to toggle
+            const checked = document.getElementById('sipToggle')?.checked;
+            updateToggleLabels(checked);
         });
 
         function addStrategy() {
@@ -206,16 +223,105 @@
             }
         }
 
+        // Called by the checkbox toggle. 'checked' true => SIP, false => NO_SIP
+        function onSIPToggle(checked) {
+            updateToggleLabels(checked);
+            const mode = checked ? 'SIP' : 'NO_SIP';
+            onSIPModeChange(mode);
+        }
+
+        function updateToggleLabels(checked) {
+            const sipLabel = document.getElementById('sipLabel');
+            const noSipLabel = document.getElementById('noSipLabel');
+            if (sipLabel && noSipLabel) {
+                sipLabel.classList.toggle('fw-bold', !!checked);
+                noSipLabel.classList.toggle('fw-bold', !checked);
+            }
+        }
+
+        function onSIPModeChange(mode) {
+            currentMode = mode;
+            if (latestResults) {
+                // rebuild only the chart according to the selected mode
+                renderChartFromResults(latestResults, currentMode);
+            }
+        }
+
+        function getGraphArrayForMode(resultItem, mode) {
+            // Prefer the selected mode's array; fall back to other available arrays if missing
+            if (mode === 'NO_SIP') {
+                return resultItem.graphDataNoSIP || resultItem.GraphDataNoSIP || resultItem.graphData || resultItem.GraphData || [];
+            }
+
+            // mode === 'SIP'
+            return resultItem.graphData || resultItem.GraphData || resultItem.graphDataNoSIP || resultItem.GraphDataNoSIP || [];
+        }
+
+        function renderChartFromResults(results, mode) {
+            const firstGraph = getGraphArrayForMode(results[0] || {}, mode);
+            const labels = firstGraph.map(d => d.month || d.Month);
+
+            const datasets = results.map((r, i) => {
+                const id = r.id || r.Id || `Strategy-${i + 1}`;
+                const graph = getGraphArrayForMode(r, mode);
+                const dataPoints = graph.map(p => p.wealth ?? p.Wealth);
+                const color = palette[i % palette.length];
+                return {
+                    label: id,
+                    data: dataPoints,
+                    borderColor: color,
+                    tension: 0.1,
+                    fill: false,
+                    pointRadius: 2
+                };
+            });
+
+            // Render or update chart
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+
+            const ctx = document.getElementById('compareChart').getContext('2d');
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: { beginAtZero: false, title: { display: true, text: 'Wealth Units' } },
+                        x: { title: { display: true, text: 'Time' } }
+                    },
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: { legend: { position: 'bottom' } }
+                }
+            });
+        }
+
+        // format Date -> dd-MMM-yyyy (e.g. 01-Feb-2026)
+        function formatDateDdMmmYyyy(d) {
+            const dt = new Date(d);
+            if (isNaN(dt)) return '';
+            const day = String(dt.getDate()).padStart(2, '0');
+            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const mon = months[dt.getMonth()] || '';
+            const year = dt.getFullYear();
+            return `${day}-${mon}-${year}`;
+        }
+
         function renderResults(data) {
             document.getElementById('resultsArea').style.display = 'block';
             const start = new Date(data.startDate || data.StartDate);
             const end = new Date(data.endDate || data.EndDate);
-            document.getElementById('periodRange').innerText = `${start.toDateString()} — ${end.toDateString()}`;
+            document.getElementById('periodRange').innerText = `${formatDateDdMmmYyyy(start)} — ${formatDateDdMmmYyyy(end)}`;
 
             const coeffContainer = document.getElementById('coefficients');
             coeffContainer.innerHTML = '';
             if (Array.isArray(data.results || data.Results)) {
                 const results = data.results || data.Results;
+                latestResults = results; // store for switching mode without refetch
 
                 // Build coefficients table
                 const table = document.createElement('table');
@@ -224,10 +330,6 @@
                 thead.innerHTML = '<tr><th>Strategy</th><th>Coefficient A</th><th>Coefficient B</th></tr>';
                 table.appendChild(thead);
                 const tbody = document.createElement('tbody');
-
-                // Prepare chart datasets assuming all strategies share same months
-                const labels = (results[0]?.graphData || results[0]?.GraphData || []).map(d => d.month || d.Month);
-                const datasets = [];
 
                 for (let i = 0; i < results.length; i++) {
                     const r = results[i];
@@ -238,43 +340,15 @@
                     const tr = document.createElement('tr');
                     tr.innerHTML = `<td>${id}</td><td>${a ?? ''}</td><td>${b ?? ''}</td>`;
                     tbody.appendChild(tr);
-
-                    const graph = r.graphData || r.GraphData || [];
-                    const dataPoints = graph.map(p => p.wealth ?? p.Wealth);
-
-                    const color = palette[i % palette.length];
-                    datasets.push({
-                        label: id,
-                        data: dataPoints,
-                        borderColor: color,
-                        tension: 0.1,
-                        fill: false,
-                        pointRadius: 2
-                    });
                 }
 
                 table.appendChild(tbody);
                 coeffContainer.appendChild(table);
 
-                // Render chart
-                if (chartInstance) { chartInstance.destroy(); }
-                const ctx = document.getElementById('compareChart').getContext('2d');
-                chartInstance = new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels: labels,
-                        datasets: datasets
-                    },
-                    options: {
-                        responsive: true,
-                        scales: {
-                            y: { beginAtZero: false, title: { display: true, text: 'Wealth Units' } },
-                            x: { title: { display: true, text: 'Time' } }
-                        },
-                        interaction: { mode: 'index', intersect: false },
-                        plugins: { legend: { position: 'bottom' } }
-                    }
-                });
+                // Determine current mode based on toggle state (checkbox)
+                currentMode = document.getElementById('sipToggle')?.checked ? 'SIP' : 'NO_SIP';
+                updateToggleLabels(document.getElementById('sipToggle')?.checked);
+                renderChartFromResults(results, currentMode);
 
                 document.getElementById('resultsArea').scrollIntoView({ behavior: 'smooth' });
             } else {

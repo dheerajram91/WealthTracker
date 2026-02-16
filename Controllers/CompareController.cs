@@ -86,7 +86,8 @@ namespace WealthTracker.Controllers
                 };
                 var periods = new List<PortfolioPeriod> { period };
 
-                var (a, b, graphData, graphDataNoSIP) = RunSimulation(periods, priceData, 100, 5);
+                ComputeHelper compHelper = new ComputeHelper(_dataHelper);
+                var (a, b, graphData, graphDataNoSIP) = compHelper.RunSimulation(periods, priceData, 100, 5);
 
                 results.Add(new CompareResult
                 {
@@ -104,86 +105,6 @@ namespace WealthTracker.Controllers
                 EndDate = endDate,
                 Results = results
             });
-        }
-
-        // Copied/adapted simulation methods (uses _dataHelper internally)
-        private (double a, double b, List<MonthlyWealthPoint> graphData, List<MonthlyWealthPoint> graphDataNoSIP) RunSimulation(
-            List<PortfolioPeriod> periods,
-            Dictionary<string, Dictionary<DateTime, double>> allPriceData,
-            double graphX,
-            double graphY)
-        {
-            var startOfSeries = periods.First().StartDate;
-            var endOfSeries = periods.First().EndDate;
-            var monthlyDates = _dataHelper.GetMonthlyDates(startOfSeries, endOfSeries);
-
-            double coeffA = 1.0;
-            double coeffB = 0.0;
-            var graphPoints = new List<MonthlyWealthPoint>();
-            var graphPoints_no_SIP = new List<MonthlyWealthPoint>();
-
-            DateTime lastCheckDate = startOfSeries;
-
-            foreach (var currentDate in monthlyDates)
-            {
-                double periodReturn = GetPortfolioReturn(lastCheckDate, currentDate, periods, allPriceData);
-
-                coeffA *= periodReturn;
-                coeffB *= periodReturn;
-
-                coeffB += 1.0;
-
-                double currentWealth = (graphX * coeffA) + (graphY * coeffB);
-                graphPoints.Add(new MonthlyWealthPoint
-                {
-                    Month = currentDate.ToString("MMM yyyy"),
-                    Wealth = Math.Round(currentWealth, 2)
-                });
-
-                currentWealth = (graphX * coeffA);
-                graphPoints_no_SIP.Add(new MonthlyWealthPoint
-                {
-                    Month = currentDate.ToString("MMM yyyy"),
-                    Wealth = Math.Round(currentWealth, 2)
-                });
-
-                lastCheckDate = currentDate;
-            }
-
-            double finalReturn = GetPortfolioReturn(lastCheckDate, endOfSeries, periods, allPriceData);
-            coeffA *= finalReturn;
-            coeffB *= finalReturn;
-
-            return (coeffA, coeffB, graphPoints, graphPoints_no_SIP);
-        }
-
-        private double GetPortfolioReturn(
-            DateTime start,
-            DateTime end,
-            List<PortfolioPeriod> periods,
-            Dictionary<string, Dictionary<DateTime, double>> allPriceData)
-        {
-            var period = periods.FirstOrDefault(p => start >= p.StartDate && start <= p.EndDate) ?? periods.First();
-
-            double totalReturn = 0;
-
-            foreach (var item in period.Items)
-            {
-                string symbol = item.Key;
-                double weight = item.Value / 100.0;
-
-                if (allPriceData.ContainsKey(symbol))
-                {
-                    var pd = allPriceData[symbol];
-                    double priceStart = _dataHelper.GetPriceOnOrBefore(start, pd);
-                    double priceEnd = _dataHelper.GetPriceOnOrBefore(end, pd);
-
-                    double assetReturn = priceEnd / priceStart;
-                    totalReturn += (assetReturn * weight);
-                }
-            }
-
-            return totalReturn;
         }
     }
 }
