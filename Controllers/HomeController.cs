@@ -18,6 +18,11 @@ namespace WealthTracker.Controllers
             return View();
         }
 
+        public IActionResult Compare()
+        {
+            return View();
+        }
+
         public IActionResult Privacy()
         {
             return View();

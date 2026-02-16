@@ -1,0 +1,285 @@
+﻿@*
+    For more information on enabling MVC for empty projects, visit https://go.microsoft.com/fwlink/?LinkID=397860
+*@
+@{
+    ViewData["Title"] = "Compare Strategies";
+    var allowedSymbols = new[] { "NIFTYBEES", "SENSEXBEES", "FXI", "BTC", "ETH", "QQQ", "IXN", "IAU", "SLV", "DIA", "VOO", "CASH" };
+
+    var symbolDescriptions = new Dictionary<string, string>
+    {
+        ["NIFTYBEES"] = "Nifty 50 ETF (India)",
+        ["SENSEXBEES"] = "Sensex ETF (India)",
+        ["FXI"] = "iShares China Large-Cap ETF",
+        ["BTC"] = "Bitcoin (crypto)",
+        ["ETH"] = "Ethereum (crypto)",
+        ["QQQ"] = "Invesco QQQ (Nasdaq-100 ETF)",
+        ["IXN"] = "iShares Global Tech ETF",
+        ["IAU"] = "iShares Gold Trust",
+        ["SLV"] = "iShares Silver Trust",
+        ["DIA"] = "SPDR Dow Jones Industrial Average ETF",
+        ["VOO"] = "Vanguard S&P 500 ETF",
+        ["CASH"] = "Cash / Stable"
+    };
+}
+
+<div class="container mt-4">
+    <h2>Compare Strategies</h2>
+    <hr />
+
+    <div id="strategiesContainer"></div>
+
+    <div id="formError" class="alert alert-danger" role="alert" style="display:none;"></div>
+
+    <div class="mt-3">
+        <button type="button" class="btn btn-secondary" onclick="addStrategy()">+ Add Strategy</button>
+        <button type="button" class="btn btn-primary" onclick="submitCompare()">Compare</button>
+    </div>
+
+    <div id="resultsArea" class="mt-5" style="display:none;">
+        <h4>Comparison Results</h4>
+        <p><strong>Period:</strong> <span id="periodRange"></span></p>
+
+        <div id="coefficients" class="mb-3"></div>
+
+        <div class="card">
+            <div class="card-body">
+                <canvas id="compareChart" width="800" height="300"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<template id="strategyTemplate">
+    <div class="card mb-3 strategy-entry">
+        <div class="card-header d-flex justify-content-between">
+            <h5 class="mb-0">Strategy</h5>
+            <button class="btn btn-sm btn-danger" onclick="removeStrategy(this)">Remove Strategy</button>
+        </div>
+        <div class="card-body">
+            <h6>Assets</h6>
+            <div class="items-container"></div>
+            <button type="button" class="btn btn-sm btn-outline-info mt-2" onclick="addItem(this)">+ Add Asset</button>
+        </div>
+    </div>
+</template>
+
+<template id="itemTemplate">
+    <div class="row mb-2 item-row">
+        <div class="col-md-6">
+            <select class="form-control symbol-select">
+                @foreach (var sym in allowedSymbols)
+                {
+                    var desc = symbolDescriptions.ContainsKey(sym) ? symbolDescriptions[sym] : string.Empty;
+                    <option value="@sym" data-desc="@desc">@sym@if(!string.IsNullOrEmpty(desc)){<text> - @desc</text>}</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-4">
+            <input type="number" class="form-control percentage-input" placeholder="Percentage (%)" min="0" max="100">
+        </div>
+        <div class="col-md-2">
+            <button class="btn btn-outline-danger" onclick="this.closest('.item-row').remove()">×</button>
+        </div>
+    </div>
+</template>
+
+@section Scripts {
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        let chartInstance = null;
+        const palette = [
+            'rgb(75, 192, 192)',
+            'rgb(54, 162, 235)',
+            'rgb(255, 99, 132)',
+            'rgb(255, 159, 64)',
+            'rgb(153, 102, 255)',
+            'rgb(201, 203, 207)',
+            'rgb(99, 255, 132)'
+        ];
+
+        document.addEventListener("DOMContentLoaded", () => {
+            addStrategy();
+            addStrategy(); // pre-add two strategies for convenience
+        });
+
+        function addStrategy() {
+            const container = document.getElementById('strategiesContainer');
+            const template = document.getElementById('strategyTemplate').content.cloneNode(true);
+            container.appendChild(template);
+            // add one default item to the new strategy
+            const lastStrategy = container.lastElementChild;
+            addItem(lastStrategy.querySelector('.btn-outline-info'));
+            updateStrategyTitles();
+        }
+
+        function removeStrategy(button) {
+            const entry = button.closest('.strategy-entry');
+            if (!entry) return;
+            entry.remove();
+            updateStrategyTitles();
+        }
+
+        function updateStrategyTitles() {
+            const entries = document.querySelectorAll('.strategy-entry');
+            entries.forEach((entry, idx) => {
+                const header = entry.querySelector('h5.mb-0');
+                if (header) {
+                    header.innerText = `Strategy-${idx + 1}`;
+                }
+            });
+        }
+
+        function addItem(button) {
+            const container = button.previousElementSibling;
+            const template = document.getElementById('itemTemplate').content.cloneNode(true);
+            container.appendChild(template);
+        }
+
+        function showFormError(message) {
+            const err = document.getElementById('formError');
+            err.innerText = message;
+            err.style.display = 'block';
+            err.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        function clearFormError() {
+            const err = document.getElementById('formError');
+            err.innerText = '';
+            err.style.display = 'none';
+        }
+
+        async function submitCompare() {
+            clearFormError();
+
+            const strategyElements = document.querySelectorAll('.strategy-entry');
+            if (!strategyElements.length) {
+                showFormError("Add at least one strategy to compare.");
+                return;
+            }
+
+            const compareItems = [];
+
+            for (let i = 0; i < strategyElements.length; i++) {
+                const el = strategyElements[i];
+                const items = {};
+                let pctSum = 0;
+                el.querySelectorAll('.item-row').forEach(row => {
+                    const sym = row.querySelector('.symbol-select').value;
+                    const pct = parseFloat(row.querySelector('.percentage-input').value) || 0;
+                    items[sym] = pct;
+                    pctSum += pct;
+                });
+
+                if (Object.keys(items).length === 0) {
+                    showFormError(`Strategy #${i + 1} has no assets.`);
+                    return;
+                }
+
+                if (Math.abs(pctSum - 100) > 0.01) {
+                    showFormError(`Percentages in Strategy #${i + 1} must sum to 100%. Current sum: ${pctSum.toFixed(2)}%.`);
+                    return;
+                }
+
+                compareItems.push({ Portfolio: items });
+            }
+
+            const requestBody = { CompareItems: compareItems };
+
+            try {
+                const response = await fetch('/compare', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody)
+                });
+
+                if (!response.ok) {
+                    const errText = await response.text();
+                    showFormError("Server error: " + errText);
+                    return;
+                }
+
+                const data = await response.json();
+                renderResults(data);
+            } catch (err) {
+                console.error("Fetch error:", err);
+                showFormError("Failed to communicate with the server. Check your network connection.");
+            }
+        }
+
+        function renderResults(data) {
+            document.getElementById('resultsArea').style.display = 'block';
+            const start = new Date(data.startDate || data.StartDate);
+            const end = new Date(data.endDate || data.EndDate);
+            document.getElementById('periodRange').innerText = `${start.toDateString()} — ${end.toDateString()}`;
+
+            const coeffContainer = document.getElementById('coefficients');
+            coeffContainer.innerHTML = '';
+            if (Array.isArray(data.results || data.Results)) {
+                const results = data.results || data.Results;
+
+                // Build coefficients table
+                const table = document.createElement('table');
+                table.className = 'table table-sm';
+                const thead = document.createElement('thead');
+                thead.innerHTML = '<tr><th>Strategy</th><th>Coefficient A</th><th>Coefficient B</th></tr>';
+                table.appendChild(thead);
+                const tbody = document.createElement('tbody');
+
+                // Prepare chart datasets assuming all strategies share same months
+                const labels = (results[0]?.graphData || results[0]?.GraphData || []).map(d => d.month || d.Month);
+                const datasets = [];
+
+                for (let i = 0; i < results.length; i++) {
+                    const r = results[i];
+                    const id = r.id || r.Id || `Strategy-${i + 1}`;
+                    const a = (r.coefficientA ?? r.CoefficientA);
+                    const b = (r.coefficientB ?? r.CoefficientB);
+
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `<td>${id}</td><td>${a ?? ''}</td><td>${b ?? ''}</td>`;
+                    tbody.appendChild(tr);
+
+                    const graph = r.graphData || r.GraphData || [];
+                    const dataPoints = graph.map(p => p.wealth ?? p.Wealth);
+
+                    const color = palette[i % palette.length];
+                    datasets.push({
+                        label: id,
+                        data: dataPoints,
+                        borderColor: color,
+                        tension: 0.1,
+                        fill: false,
+                        pointRadius: 2
+                    });
+                }
+
+                table.appendChild(tbody);
+                coeffContainer.appendChild(table);
+
+                // Render chart
+                if (chartInstance) { chartInstance.destroy(); }
+                const ctx = document.getElementById('compareChart').getContext('2d');
+                chartInstance = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: datasets
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: { beginAtZero: false, title: { display: true, text: 'Wealth Units' } },
+                            x: { title: { display: true, text: 'Time' } }
+                        },
+                        interaction: { mode: 'index', intersect: false },
+                        plugins: { legend: { position: 'bottom' } }
+                    }
+                });
+
+                document.getElementById('resultsArea').scrollIntoView({ behavior: 'smooth' });
+            } else {
+                showFormError("Unexpected response format from server.");
+            }
+        }
+    </script>
+}
