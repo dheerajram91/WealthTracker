@@ -36,7 +36,15 @@
     </div>
 
     <div id="resultsArea" class="mt-5" style="display:none;">
-        <h4>Comparison Results</h4>
+        <h3>Comparison Results</h3>
+        <div id="coefficients" class="mb-3"></div>
+
+        <div class="card">
+            <div class="card-body">
+                <canvas id="compareChart" width="800" height="300"></canvas>
+            </div>
+        </div>
+
         <p><strong>Period:</strong> <span id="periodRange"></span></p>
 
         <!-- Toggle slider between SIP and NO SIP -->
@@ -48,14 +56,6 @@
             </div>
 
             <span id="sipLabel" class="ms-2 fw-bold">SIP</span>
-        </div>
-
-        <div id="coefficients" class="mb-3"></div>
-
-        <div class="card">
-            <div class="card-body">
-                <canvas id="compareChart" width="800" height="300"></canvas>
-            </div>
         </div>
     </div>
 </div>
@@ -257,6 +257,33 @@
             return resultItem.graphData || resultItem.GraphData || resultItem.graphDataNoSIP || resultItem.GraphDataNoSIP || [];
         }
 
+        // Convert 'rgb(r, g, b)' or '#rrggbb' to 'rgba(r, g, b, a)'. Fallback to provided color when unknown.
+        function colorToRgba(color, alpha) {
+            try {
+                if (!color) return `rgba(75, 192, 192, ${alpha})`;
+                color = color.trim();
+                if (color.startsWith('rgba')) return color; // assume caller passed correct rgba
+                if (color.startsWith('rgb(')) {
+                    return color.replace('rgb(', 'rgba(').replace(')', `, ${alpha})`);
+                }
+                if (color.startsWith('#')) {
+                    const hex = color.slice(1);
+                    const r = parseInt(hex.length === 3 ? hex[0] + hex[0] : hex.slice(0, 2), 16);
+                    const g = parseInt(hex.length === 3 ? hex[1] + hex[1] : hex.slice(2, 4), 16);
+                    const b = parseInt(hex.length === 3 ? hex[2] + hex[2] : hex.slice(4, 6), 16);
+                    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+                }
+                // fallback: try to extract numbers
+                const nums = color.match(/\d+/g);
+                if (nums && nums.length >= 3) {
+                    return `rgba(${nums[0]}, ${nums[1]}, ${nums[2]}, ${alpha})`;
+                }
+            } catch (e) {
+                // ignore and fallback
+            }
+            return `rgba(75, 192, 192, ${alpha})`;
+        }
+
         function renderChartFromResults(results, mode) {
             const firstGraph = getGraphArrayForMode(results[0] || {}, mode);
             const labels = firstGraph.map(d => d.month || d.Month);
@@ -266,12 +293,14 @@
                 const graph = getGraphArrayForMode(r, mode);
                 const dataPoints = graph.map(p => p.wealth ?? p.Wealth);
                 const color = palette[i % palette.length];
+                const bg = colorToRgba(color, 0.2); // shade below the line similar to Index.cshtml
                 return {
                     label: id,
                     data: dataPoints,
                     borderColor: color,
+                    backgroundColor: bg,
                     tension: 0.1,
-                    fill: false,
+                    fill: true,
                     pointRadius: 2
                 };
             });
@@ -318,16 +347,18 @@
             document.getElementById('periodRange').innerText = `${formatDateDdMmmYyyy(start)} — ${formatDateDdMmmYyyy(end)}`;
 
             const coeffContainer = document.getElementById('coefficients');
-            coeffContainer.innerHTML = '';
+            // Insert heading + explanatory text (matches Index.cshtml style)
+            coeffContainer.innerHTML = '<h4>Investment Formulas</h4><h5>Where X is the lump‑sum invested at the beginning, and Y is the monthly investment (SIP)</h5>';
+
             if (Array.isArray(data.results || data.Results)) {
                 const results = data.results || data.Results;
                 latestResults = results; // store for switching mode without refetch
 
-                // Build coefficients table
+                // Build formulas table (2 columns: Strategy | Formula)
                 const table = document.createElement('table');
                 table.className = 'table table-sm';
                 const thead = document.createElement('thead');
-                thead.innerHTML = '<tr><th>Strategy</th><th>Coefficient A</th><th>Coefficient B</th></tr>';
+                thead.innerHTML = '<tr><th>Strategy</th><th>Investment Formula</th></tr>';
                 table.appendChild(thead);
                 const tbody = document.createElement('tbody');
 
@@ -337,8 +368,24 @@
                     const a = (r.coefficientA ?? r.CoefficientA);
                     const b = (r.coefficientB ?? r.CoefficientB);
 
+                    // Format formula as "1.16X + 16.50Y"
+                    const aVal = Number(a);
+                    const bVal = Number(b);
+                    let formula = '';
+                    if (Number.isFinite(aVal)) {
+                        formula += `${aVal.toFixed(2)}X`;
+                    }
+                    if (Number.isFinite(bVal)) {
+                        if (formula) {
+                            formula += (bVal >= 0 ? ` + ${Math.abs(bVal).toFixed(2)}Y` : ` - ${Math.abs(bVal).toFixed(2)}Y`);
+                        } else {
+                            // If there's no A part, don't prefix with '+'
+                            formula += (bVal >= 0 ? `${bVal.toFixed(2)}Y` : `-${Math.abs(bVal).toFixed(2)}Y`);
+                        }
+                    }
+
                     const tr = document.createElement('tr');
-                    tr.innerHTML = `<td>${id}</td><td>${a ?? ''}</td><td>${b ?? ''}</td>`;
+                    tr.innerHTML = `<td>${id}</td><td>${formula}</td>`;
                     tbody.appendChild(tr);
                 }
 
