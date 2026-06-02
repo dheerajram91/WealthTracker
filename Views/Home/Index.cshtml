@@ -20,11 +20,13 @@
     </div>
 
     <div id="resultsArea" class="mt-5" style="display:none;">
-        <h3>Investment Formula: <span id="polynomialOutput" class="text-success font-weight-bold"></span></h3>
-        <h4>Where X is the lump‑sum invested at the beginning, and Y is the monthly investment (SIP)</h4>
+        <h3 class="h4">Investment Formula: <span id="polynomialOutput" class="text-success fw-bold"></span></h3>
+        <p class="text-muted">Where X is the lump‑sum invested at the beginning, and Y is the monthly investment (SIP)</p>
         <div class="card mt-3">
-            <div class="card-body">
-                <canvas id="wealthChart" width="400" height="200"></canvas>
+            <div class="card-body p-2 p-md-3">
+                <div class="chart-container">
+                    <canvas id="wealthChart"></canvas>
+                </div>
             </div>
         </div>
         <div id="shareSection" class="mt-2" style="display:none;">
@@ -303,15 +305,40 @@
                 },
                 options: {
                     responsive: true,
+                    maintainAspectRatio: false,
                     scales: {
-                        y: { beginAtZero: false, title: { display: true, text: 'Wealth Units' } },
-                        x: { title: { display: true, text: 'Time' } }
+                        y: { 
+                            beginAtZero: false, 
+                            title: { display: true, text: 'Wealth Units', color: '#9ca3af' },
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9ca3af' }
+                        },
+                        x: { 
+                            title: { display: true, text: 'Time', color: '#9ca3af' },
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9ca3af' }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            labels: { color: '#ffffff' }
+                        }
                     }
                 }
             });
 
+            // Listen to resize to auto-recalculate height when phone rotates
+            window.removeEventListener('resize', resizeChart);
+            window.addEventListener('resize', resizeChart);
+
             // Scroll to results
             document.getElementById('resultsArea').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function resizeChart() {
+            if (chartInstance) {
+                chartInstance.resize();
+            }
         }
     </script>
 }

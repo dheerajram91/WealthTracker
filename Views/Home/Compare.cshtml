@@ -22,16 +22,18 @@
     </div>
 
     <div id="resultsArea" class="mt-5" style="display:none;">
-        <h3>Comparison Results</h3>
-        <div id="coefficients" class="mb-3"></div>
-
-        <div class="card">
-            <div class="card-body">
-                <canvas id="compareChart" width="800" height="300"></canvas>
+        <h3 class="h4 mb-3">Comparison Results</h3>
+        <div id="coefficients" class="mb-4"></div>
+ 
+        <div class="card mb-4">
+            <div class="card-body p-2 p-md-3">
+                <div class="chart-container">
+                    <canvas id="compareChart"></canvas>
+                </div>
             </div>
         </div>
-
-        <p><strong>Period:</strong> <span id="periodRange"></span></p>
+ 
+        <p class="text-muted"><strong>Period:</strong> <span id="periodRange" class="text-white"></span></p>
 
         <!-- Custom Start Date dropdown and Toggle slider side by side -->
         <div class="mb-3 d-flex flex-wrap align-items-center gap-4">
@@ -379,14 +381,39 @@
                 },
                 options: {
                     responsive: true,
+                    maintainAspectRatio: false,
                     scales: {
-                        y: { beginAtZero: false, title: { display: true, text: 'Wealth Units' } },
-                        x: { title: { display: true, text: 'Time' } }
+                        y: { 
+                            beginAtZero: false, 
+                            title: { display: true, text: 'Wealth Units', color: '#9ca3af' },
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9ca3af' }
+                        },
+                        x: { 
+                            title: { display: true, text: 'Time', color: '#9ca3af' },
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9ca3af' }
+                        }
                     },
                     interaction: { mode: 'index', intersect: false },
-                    plugins: { legend: { position: 'bottom' } }
+                    plugins: { 
+                        legend: { 
+                            position: 'bottom',
+                            labels: { color: '#ffffff' }
+                        } 
+                    }
                 }
             });
+
+            // Listen to resize to auto-recalculate height when phone rotates
+            window.removeEventListener('resize', resizeChart);
+            window.addEventListener('resize', resizeChart);
+        }
+
+        function resizeChart() {
+            if (chartInstance) {
+                chartInstance.resize();
+            }
         }
 
         // format Date -> dd-MMM-yyyy (e.g. 01-Feb-2026)

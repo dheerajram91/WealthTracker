@@ -25,6 +25,13 @@ builder.Services.AddSingleton<DataProcessHelper>(sp =>
 
 var app = builder.Build();
 
+// Eagerly resolve DataProcessHelper on startup to trigger its static initialization and load symbols.json/CSVs.
+using (var scope = app.Services.CreateScope())
+{
+    scope.ServiceProvider.GetRequiredService<DataProcessHelper>();
+}
+
+
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
 {
