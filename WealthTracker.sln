@@ -1,20 +1,46 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.36811.4 d17.14
+VisualStudioVersion = 17.14.36811.4
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WealthTracker", "WealthTracker.csproj", "{63E82DC9-CCDA-4396-B8FC-DA1DE67E135B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WealthTracker.DataUpdater", "WealthTracker.DataUpdater\WealthTracker.DataUpdater.csproj", "{09F28050-C147-4664-9658-60A44EF7D45F}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
 		Release|Any CPU = Release|Any CPU
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{63E82DC9-CCDA-4396-B8FC-DA1DE67E135B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{63E82DC9-CCDA-4396-B8FC-DA1DE67E135B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{63E82DC9-CCDA-4396-B8FC-DA1DE67E135B}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{63E82DC9-CCDA-4396-B8FC-DA1DE67E135B}.Debug|x64.Build.0 = Debug|Any CPU
+		{63E82DC9-CCDA-4396-B8FC-DA1DE67E135B}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{63E82DC9-CCDA-4396-B8FC-DA1DE67E135B}.Debug|x86.Build.0 = Debug|Any CPU
 		{63E82DC9-CCDA-4396-B8FC-DA1DE67E135B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{63E82DC9-CCDA-4396-B8FC-DA1DE67E135B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{63E82DC9-CCDA-4396-B8FC-DA1DE67E135B}.Release|x64.ActiveCfg = Release|Any CPU
+		{63E82DC9-CCDA-4396-B8FC-DA1DE67E135B}.Release|x64.Build.0 = Release|Any CPU
+		{63E82DC9-CCDA-4396-B8FC-DA1DE67E135B}.Release|x86.ActiveCfg = Release|Any CPU
+		{63E82DC9-CCDA-4396-B8FC-DA1DE67E135B}.Release|x86.Build.0 = Release|Any CPU
+		{09F28050-C147-4664-9658-60A44EF7D45F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{09F28050-C147-4664-9658-60A44EF7D45F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{09F28050-C147-4664-9658-60A44EF7D45F}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{09F28050-C147-4664-9658-60A44EF7D45F}.Debug|x64.Build.0 = Debug|Any CPU
+		{09F28050-C147-4664-9658-60A44EF7D45F}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{09F28050-C147-4664-9658-60A44EF7D45F}.Debug|x86.Build.0 = Debug|Any CPU
+		{09F28050-C147-4664-9658-60A44EF7D45F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{09F28050-C147-4664-9658-60A44EF7D45F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{09F28050-C147-4664-9658-60A44EF7D45F}.Release|x64.ActiveCfg = Release|Any CPU
+		{09F28050-C147-4664-9658-60A44EF7D45F}.Release|x64.Build.0 = Release|Any CPU
+		{09F28050-C147-4664-9658-60A44EF7D45F}.Release|x86.ActiveCfg = Release|Any CPU
+		{09F28050-C147-4664-9658-60A44EF7D45F}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

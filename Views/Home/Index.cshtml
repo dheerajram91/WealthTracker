@@ -1,24 +1,8 @@
-﻿@{
+@using WealthTracker.Helper
+@{
     ViewData["Title"] = "Portfolio Builder";
-    var allowedSymbols = new[] { "NIFTYBEES", "SENSEXBEES", "FXI", "BTC", "ETH", "QQQ", "IXN", "IAU", "SLV", "DIA", "VOO", "CASH" };
-
-    // Short descriptions only for the UI dropdown. The option value remains the symbol
-    // so the API calls /portfolio and /stock still send the same symbol string.
-    var symbolDescriptions = new Dictionary<string, string>
-    {
-        ["NIFTYBEES"] = "Nifty 50 ETF (India)",
-        ["SENSEXBEES"] = "Sensex ETF (India)",
-        ["FXI"] = "iShares China Large-Cap ETF",
-        ["BTC"] = "Bitcoin (crypto)",
-        ["ETH"] = "Ethereum (crypto)",
-        ["QQQ"] = "Invesco QQQ (Nasdaq-100 ETF)",
-        ["IXN"] = "iShares Global Tech ETF",
-        ["IAU"] = "iShares Gold Trust",
-        ["SLV"] = "iShares Silver Trust",
-        ["DIA"] = "SPDR Dow Jones Industrial Average ETF",
-        ["VOO"] = "Vanguard S&P 500 ETF",
-        ["CASH"] = "Cash / Stable"
-    };
+    var allowedSymbols = DataProcessHelper.AllowedSymbols;
+    var symbolDescriptions = DataProcessHelper.SymbolDescriptions;
 }
 
 <div class="container mt-4">

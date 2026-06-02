@@ -1,25 +1,11 @@
-﻿@*
+@*
     For more information on enabling MVC for empty projects, visit https://go.microsoft.com/fwlink/?LinkID=397860
 *@
+@using WealthTracker.Helper
 @{
     ViewData["Title"] = "Compare Strategies";
-    var allowedSymbols = new[] { "NIFTYBEES", "SENSEXBEES", "FXI", "BTC", "ETH", "QQQ", "IXN", "IAU", "SLV", "DIA", "VOO", "CASH" };
-
-    var symbolDescriptions = new Dictionary<string, string>
-    {
-        ["NIFTYBEES"] = "Nifty 50 ETF (India)",
-        ["SENSEXBEES"] = "Sensex ETF (India)",
-        ["FXI"] = "iShares China Large-Cap ETF",
-        ["BTC"] = "Bitcoin (crypto)",
-        ["ETH"] = "Ethereum (crypto)",
-        ["QQQ"] = "Invesco QQQ (Nasdaq-100 ETF)",
-        ["IXN"] = "iShares Global Tech ETF",
-        ["IAU"] = "iShares Gold Trust",
-        ["SLV"] = "iShares Silver Trust",
-        ["DIA"] = "SPDR Dow Jones Industrial Average ETF",
-        ["VOO"] = "Vanguard S&P 500 ETF",
-        ["CASH"] = "Cash / Stable"
-    };
+    var allowedSymbols = DataProcessHelper.AllowedSymbols;
+    var symbolDescriptions = DataProcessHelper.SymbolDescriptions;
 }
 
 <div class="container mt-4">
@@ -47,15 +33,26 @@
 
         <p><strong>Period:</strong> <span id="periodRange"></span></p>
 
-        <!-- Toggle slider between SIP and NO SIP -->
-        <div class="mb-2 d-flex align-items-center">
-            <span id="noSipLabel" class="me-2">NO SIP</span>
-
-            <div class="form-check form-switch mx-2">
-                <input class="form-check-input" type="checkbox" id="sipToggle" checked onchange="onSIPToggle(this.checked)" role="switch" aria-checked="true" aria-label="Toggle SIP mode">
+        <!-- Custom Start Date dropdown and Toggle slider side by side -->
+        <div class="mb-3 d-flex flex-wrap align-items-center gap-4">
+            <!-- Start Date dropdown -->
+            <div class="d-flex align-items-center">
+                <label for="customStartDateSelect" class="me-2 fw-bold">Filter Start Date:</label>
+                <select id="customStartDateSelect" class="form-select d-inline-block w-auto" onchange="onStartDateChange(this.value)">
+                    <option value="">Default (Oldest Available)</option>
+                </select>
             </div>
 
-            <span id="sipLabel" class="ms-2 fw-bold">SIP</span>
+            <!-- Toggle slider between SIP and NO SIP -->
+            <div class="d-flex align-items-center">
+                <span id="noSipLabel" class="me-2">NO SIP</span>
+
+                <div class="form-check form-switch mx-2">
+                    <input class="form-check-input" type="checkbox" id="sipToggle" checked onchange="onSIPToggle(this.checked)" role="switch" aria-checked="true" aria-label="Toggle SIP mode">
+                </div>
+
+                <span id="sipLabel" class="ms-2 fw-bold">SIP</span>
+            </div>
         </div>
     </div>
 </div>
@@ -99,7 +96,60 @@
     <script>
         let chartInstance = null;
         let latestResults = null; // stored server response results array
+        let originalServerData = null; // stored original full response payload
         let currentMode = 'SIP'; // 'SIP' or 'NO_SIP'
+
+        function getRescaledResults(results, k) {
+            return results.map((r, i) => {
+                const sipPoints = r.graphData || r.GraphData || [];
+                const noSipPoints = r.graphDataNoSIP || r.GraphDataNoSIP || [];
+                
+                if (k < 0 || k >= sipPoints.length) return r;
+
+                const W_sip_k = sipPoints[k].wealth ?? sipPoints[k].Wealth;
+                const W_nosip_k = noSipPoints[k].wealth ?? noSipPoints[k].Wealth;
+
+                const A_k = W_nosip_k / 100;
+                const B_k = (W_sip_k - W_nosip_k) / 5;
+
+                const rescaledSip = [];
+                const rescaledNoSip = [];
+
+                for (let j = k; j < sipPoints.length; j++) {
+                    const W_sip_j = sipPoints[j].wealth ?? sipPoints[j].Wealth;
+                    const W_nosip_j = noSipPoints[j].wealth ?? noSipPoints[j].Wealth;
+
+                    const A_j = W_nosip_j / 100;
+                    const B_j = (W_sip_j - W_nosip_j) / 5;
+
+                    const A_prime_j = A_k > 0 ? (A_j / A_k) : 0;
+                    const B_prime_j = B_j - A_prime_j * B_k;
+
+                    rescaledSip.push({
+                        month: sipPoints[j].month || sipPoints[j].Month,
+                        wealth: Math.round((100 * A_prime_j + 5 * B_prime_j) * 100) / 100
+                    });
+
+                    rescaledNoSip.push({
+                        month: noSipPoints[j].month || noSipPoints[j].Month,
+                        wealth: Math.round((100 * A_prime_j) * 100) / 100
+                    });
+                }
+
+                // Final coefficients at the last point
+                const final_A_prime = A_k > 0 ? ( (noSipPoints[noSipPoints.length - 1].wealth ?? noSipPoints[noSipPoints.length - 1].Wealth) / 100 / A_k ) : 0;
+                const final_B_prime = ( (sipPoints[sipPoints.length - 1].wealth ?? sipPoints[sipPoints.length - 1].Wealth) - (noSipPoints[noSipPoints.length - 1].wealth ?? noSipPoints[noSipPoints.length - 1].Wealth) ) / 5 - final_A_prime * B_k;
+
+                return {
+                    id: r.id || r.Id,
+                    message: r.message || r.Message,
+                    coefficientA: final_A_prime,
+                    coefficientB: final_B_prime,
+                    graphData: rescaledSip,
+                    graphDataNoSIP: rescaledNoSip
+                };
+            });
+        }
         const palette = [
             'rgb(75, 192, 192)',
             'rgb(54, 162, 235)',
@@ -242,7 +292,17 @@
         function onSIPModeChange(mode) {
             currentMode = mode;
             if (latestResults) {
-                // rebuild only the chart according to the selected mode
+                const selectVal = document.getElementById('customStartDateSelect')?.value;
+                if (selectVal) {
+                    const firstGraph = getGraphArrayForMode(latestResults[0] || {}, 'SIP');
+                    const labels = firstGraph.map(d => d.month || d.Month);
+                    const k = labels.indexOf(selectVal);
+                    if (k >= 0) {
+                        const rescaled = getRescaledResults(latestResults, k);
+                        renderChartFromResults(rescaled, currentMode);
+                        return;
+                    }
+                }
                 renderChartFromResults(latestResults, currentMode);
             }
         }
@@ -342,57 +402,33 @@
 
         function renderResults(data) {
             document.getElementById('resultsArea').style.display = 'block';
+            originalServerData = data; // store the raw data payload for resetting/filtering
+            
             const start = new Date(data.startDate || data.StartDate);
             const end = new Date(data.endDate || data.EndDate);
             document.getElementById('periodRange').innerText = `${formatDateDdMmmYyyy(start)} — ${formatDateDdMmmYyyy(end)}`;
 
-            const coeffContainer = document.getElementById('coefficients');
-            // Insert heading + explanatory text (matches Index.cshtml style)
-            coeffContainer.innerHTML = '<h4>Investment Formulas</h4><h5>Where X is the lump‑sum invested at the beginning, and Y is the monthly investment (SIP)</h5>';
-
             if (Array.isArray(data.results || data.Results)) {
                 const results = data.results || data.Results;
-                latestResults = results; // store for switching mode without refetch
+                latestResults = results; // store for switching mode/start date without refetch
 
-                // Build formulas table (2 columns: Strategy | Formula)
-                const table = document.createElement('table');
-                table.className = 'table table-sm';
-                const thead = document.createElement('thead');
-                thead.innerHTML = '<tr><th>Strategy</th><th>Investment Formula</th></tr>';
-                table.appendChild(thead);
-                const tbody = document.createElement('tbody');
-
-                for (let i = 0; i < results.length; i++) {
-                    const r = results[i];
-                    const id = r.id || r.Id || `Strategy-${i + 1}`;
-                    const a = (r.coefficientA ?? r.CoefficientA);
-                    const b = (r.coefficientB ?? r.CoefficientB);
-
-                    // Format formula as "1.16X + 16.50Y"
-                    const aVal = Number(a);
-                    const bVal = Number(b);
-                    let formula = '';
-                    if (Number.isFinite(aVal)) {
-                        formula += `${aVal.toFixed(2)}X`;
+                // Populate custom start date dropdown
+                const firstGraph = getGraphArrayForMode(results[0] || {}, 'SIP');
+                const labels = firstGraph.map(d => d.month || d.Month);
+                const select = document.getElementById('customStartDateSelect');
+                select.innerHTML = '<option value="">Default (Oldest Available)</option>';
+                labels.forEach((label, idx) => {
+                    if (idx < labels.length - 1) { // Skip the last month because simulation requires at least 2 points
+                        const opt = document.createElement('option');
+                        opt.value = label;
+                        opt.innerText = label;
+                        select.appendChild(opt);
                     }
-                    if (Number.isFinite(bVal)) {
-                        if (formula) {
-                            formula += (bVal >= 0 ? ` + ${Math.abs(bVal).toFixed(2)}Y` : ` - ${Math.abs(bVal).toFixed(2)}Y`);
-                        } else {
-                            // If there's no A part, don't prefix with '+'
-                            formula += (bVal >= 0 ? `${bVal.toFixed(2)}Y` : `-${Math.abs(bVal).toFixed(2)}Y`);
-                        }
-                    }
+                });
 
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `<td>${id}</td><td>${formula}</td>`;
-                    tbody.appendChild(tr);
-                }
+                // Build formulas table and render chart
+                renderFormulaTable(results);
 
-                table.appendChild(tbody);
-                coeffContainer.appendChild(table);
-
-                // Determine current mode based on toggle state (checkbox)
                 currentMode = document.getElementById('sipToggle')?.checked ? 'SIP' : 'NO_SIP';
                 updateToggleLabels(document.getElementById('sipToggle')?.checked);
                 renderChartFromResults(results, currentMode);
@@ -401,6 +437,82 @@
             } else {
                 showFormError("Unexpected response format from server.");
             }
+        }
+
+        function renderFormulaTable(results) {
+            const coeffContainer = document.getElementById('coefficients');
+            coeffContainer.innerHTML = '<h4>Investment Formulas</h4><h5>Where X is the lump‑sum invested at the beginning, and Y is the monthly investment (SIP)</h5>';
+
+            const table = document.createElement('table');
+            table.className = 'table table-sm';
+            const thead = document.createElement('thead');
+            thead.innerHTML = '<tr><th>Strategy</th><th>Investment Formula</th></tr>';
+            table.appendChild(thead);
+            const tbody = document.createElement('tbody');
+
+            for (let i = 0; i < results.length; i++) {
+                const r = results[i];
+                const id = r.id || r.Id || `Strategy-${i + 1}`;
+                const a = (r.coefficientA ?? r.CoefficientA);
+                const b = (r.coefficientB ?? r.CoefficientB);
+
+                const aVal = Number(a);
+                const bVal = Number(b);
+                let formula = '';
+                if (Number.isFinite(aVal)) {
+                    formula += `${aVal.toFixed(2)}X`;
+                }
+                if (Number.isFinite(bVal)) {
+                    if (formula) {
+                        formula += (bVal >= 0 ? ` + ${Math.abs(bVal).toFixed(2)}Y` : ` - ${Math.abs(bVal).toFixed(2)}Y`);
+                    } else {
+                        formula += (bVal >= 0 ? `${bVal.toFixed(2)}Y` : `-${Math.abs(bVal).toFixed(2)}Y`);
+                    }
+                }
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td>${id}</td><td>${formula}</td>`;
+                tbody.appendChild(tr);
+            }
+
+            table.appendChild(tbody);
+            coeffContainer.appendChild(table);
+        }
+
+        function onStartDateChange(value) {
+            if (!latestResults || !originalServerData) return;
+
+            const mode = document.getElementById('sipToggle')?.checked ? 'SIP' : 'NO_SIP';
+
+            if (!value) {
+                // Restore original results
+                const start = new Date(originalServerData.startDate || originalServerData.StartDate);
+                const end = new Date(originalServerData.endDate || originalServerData.EndDate);
+                document.getElementById('periodRange').innerText = `${formatDateDdMmmYyyy(start)} — ${formatDateDdMmmYyyy(end)}`;
+
+                renderFormulaTable(latestResults);
+                renderChartFromResults(latestResults, mode);
+                return;
+            }
+
+            // Find index of start date
+            const firstGraph = getGraphArrayForMode(latestResults[0] || {}, 'SIP');
+            const labels = firstGraph.map(d => d.month || d.Month);
+            const k = labels.indexOf(value);
+            if (k < 0) return;
+
+            // Generate rescaled results
+            const rescaled = getRescaledResults(latestResults, k);
+
+            // Update displayed range text (display label format)
+            const startLabel = labels[k];
+            const displayStart = "01-" + startLabel.replace(" ", "-");
+            const end = new Date(originalServerData.endDate || originalServerData.EndDate);
+            document.getElementById('periodRange').innerText = `${displayStart} — ${formatDateDdMmmYyyy(end)}`;
+
+            // Render updated table and chart
+            renderFormulaTable(rescaled);
+            renderChartFromResults(rescaled, mode);
         }
     </script>
 }

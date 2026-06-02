@@ -1,0 +1,14 @@
+{
+  "NIFTYBEES": "Nifty 50 ETF (India)",
+  "SENSEXBEES": "Sensex ETF (India)",
+  "FXI": "iShares China Large-Cap ETF",
+  "BTC": "Bitcoin (crypto)",
+  "ETH": "Ethereum (crypto)",
+  "QQQ": "Invesco QQQ (Nasdaq-100 ETF)",
+  "IXN": "iShares Global Tech ETF",
+  "IAU": "iShares Gold Trust",
+  "SLV": "iShares Silver Trust",
+  "DIA": "SPDR Dow Jones Industrial Average ETF",
+  "VOO": "Vanguard S&P 500 ETF",
+  "CASH": "Cash / Stable"
+}

@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Caching.Memory;
 using System.Collections.Concurrent;
 using System.Globalization;
@@ -13,6 +13,25 @@ namespace WealthTracker.Helper
         private readonly IMemoryCache _memoryCache;
         private readonly ConcurrentDictionary<string, DateTime> _oldestDataCache = new ConcurrentDictionary<string, DateTime>();
 
+        private static readonly Dictionary<string, string> _symbolDescriptions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["NIFTYBEES"] = "Nifty 50 ETF (India)",
+            ["SENSEXBEES"] = "Sensex ETF (India)",
+            ["FXI"] = "iShares China Large-Cap ETF",
+            ["BTC"] = "Bitcoin (crypto)",
+            ["ETH"] = "Ethereum (crypto)",
+            ["QQQ"] = "Invesco QQQ (Nasdaq-100 ETF)",
+            ["IXN"] = "iShares Global Tech ETF",
+            ["IAU"] = "iShares Gold Trust",
+            ["SLV"] = "iShares Silver Trust",
+            ["DIA"] = "SPDR Dow Jones Industrial Average ETF",
+            ["VOO"] = "Vanguard S&P 500 ETF",
+            ["CASH"] = "Cash / Stable"
+        };
+
+        public static Dictionary<string, string> SymbolDescriptions => _symbolDescriptions;
+        public static List<string> AllowedSymbols => _symbolDescriptions.Keys.ToList();
+
         public DataProcessHelper(IMemoryCache memoryCache)
         {
             _memoryCache = memoryCache ?? throw new ArgumentNullException(nameof(memoryCache));
@@ -23,16 +42,97 @@ namespace WealthTracker.Helper
         public static void Initialize(string csvPath, string baseUrl)
         {
             _csvPath = csvPath;
-            _baseUrl = baseUrl;
+            if (!string.IsNullOrEmpty(baseUrl))
+            {
+                _baseUrl = baseUrl;
+            }
+            LoadSymbolDescriptions();
+        }
+
+        private static void LoadSymbolDescriptions()
+        {
+            if (string.IsNullOrEmpty(_csvPath)) return;
+
+            var jsonPath = Path.Combine(_csvPath, "symbols.json");
+            if (System.IO.File.Exists(jsonPath))
+            {
+                try
+                {
+                    var json = System.IO.File.ReadAllText(jsonPath);
+                    var dict = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+                    if (dict != null)
+                    {
+                        _symbolDescriptions.Clear();
+                        foreach (var kvp in dict)
+                        {
+                            _symbolDescriptions[kvp.Key] = kvp.Value;
+                        }
+                    }
+                }
+                catch
+                {
+                    // Fallback to default
+                }
+            }
+
+            // Supplement with any CSVs found in the directory that aren't in the descriptions map
+            if (System.IO.Directory.Exists(_csvPath))
+            {
+                var files = System.IO.Directory.GetFiles(_csvPath, "*.csv");
+                foreach (var file in files)
+                {
+                    var sym = Path.GetFileNameWithoutExtension(file).ToUpperInvariant();
+                    if (!_symbolDescriptions.ContainsKey(sym))
+                    {
+                        _symbolDescriptions[sym] = $"{sym} Asset";
+                    }
+                }
+            }
         }
 
         public async Task<DateTime> GetOldestDateAsync(string symbol)
         {
-            if (!string.IsNullOrEmpty(symbol) && _oldestDataCache.TryGetValue(symbol, out var cached))
+            if (string.IsNullOrEmpty(symbol)) return DateTime.MinValue;
+
+            if (_oldestDataCache.TryGetValue(symbol, out var cached))
             {
                 return cached;
             }
 
+            var filePath = Path.Combine(_csvPath, $"{symbol}.csv");
+            if (System.IO.File.Exists(filePath))
+            {
+                try
+                {
+                    var lines = System.IO.File.ReadAllLines(filePath);
+                    if (lines.Length > 1)
+                    {
+                        var firstLine = lines[1];
+                        var lastLine = lines[lines.Length - 1];
+
+                        DateTime? firstDate = ParseDateFromLine(firstLine);
+                        DateTime? lastDate = ParseDateFromLine(lastLine);
+
+                        if (firstDate.HasValue && lastDate.HasValue)
+                        {
+                            var resultOldest = firstDate.Value < lastDate.Value ? firstDate.Value : lastDate.Value;
+                            _oldestDataCache[symbol] = resultOldest;
+                            return resultOldest;
+                        }
+                        else if (firstDate.HasValue)
+                        {
+                            _oldestDataCache[symbol] = firstDate.Value;
+                            return firstDate.Value;
+                        }
+                    }
+                }
+                catch
+                {
+                    // Fallback to loading the entire file if reading fails
+                }
+            }
+
+            // Fallback parsing (e.g. if CSV structure is different or read failed)
             var prices = await GetOrLoadPriceDataAsync(symbol).ConfigureAwait(false);
             if (prices == null || !prices.Any())
             {
@@ -43,6 +143,39 @@ namespace WealthTracker.Helper
             var oldest = prices.Keys.Min();
             _oldestDataCache[symbol] = oldest;
             return oldest;
+        }
+
+        private static DateTime? ParseDateFromLine(string line)
+        {
+            if (string.IsNullOrWhiteSpace(line)) return null;
+
+            // Try 2-column yyyy-MM-dd
+            var parts = line.Split(',');
+            if (parts.Length == 2)
+            {
+                if (DateTime.TryParseExact(parts[0].Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime d))
+                    return d;
+            }
+
+            // Try Yahoo format "Dec 19, 2025"
+            var yahooParts = line.Split(new[] { "\",", "," }, StringSplitOptions.None);
+            if (yahooParts.Length >= 2)
+            {
+                string dateStr1 = yahooParts[0].Trim('"');
+                string dateStr2 = yahooParts[1].Trim('"');
+                string dateStr = $"{dateStr1},{dateStr2}";
+                if (DateTime.TryParseExact(dateStr.Trim(), new[] { "MMM dd, yyyy", "MMM d, yyyy" }, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime d))
+                    return d;
+            }
+
+            // Try 7-column yyyy-MM-dd
+            if (parts.Length >= 1)
+            {
+                if (DateTime.TryParseExact(parts[0].Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime d))
+                    return d;
+            }
+
+            return null;
         }
 
         public async Task<Dictionary<DateTime, double>> GetOrLoadPriceDataAsync(string symbol)
@@ -128,15 +261,41 @@ namespace WealthTracker.Helper
                     var line = reader.ReadLine();
                     if (string.IsNullOrWhiteSpace(line)) continue;
 
-                    // Handle quoted dates like "Dec 27, 2025"
-                    var parts = line.Split(new[] { "\",", "," }, StringSplitOptions.None);
-                    string dateStr_1 = parts[0].Trim('"');
-                    string dateStr_2 = parts[1];
-                    string dateStr = dateStr_1 + "," + dateStr_2;
-                    if (DateTime.TryParseExact(dateStr, "MMM dd, yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime date))
+                    // Try parsing the 2-column yyyy-MM-dd format first
+                    var parts = line.Split(',');
+                    if (parts.Length == 2)
                     {
-                        // parts[5] is the 'Close' price
-                        if (double.TryParse(parts[5], out double closePrice))
+                        string dateStr = parts[0].Trim();
+                        string priceStr = parts[1].Trim();
+                        if (DateTime.TryParseExact(dateStr, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime date) &&
+                            double.TryParse(priceStr, NumberStyles.Any, CultureInfo.InvariantCulture, out double closePrice))
+                        {
+                            prices[date] = closePrice;
+                            continue;
+                        }
+                    }
+
+                    // Try parsing the 7-column Yahoo format: "Dec 19, 2025",Open,High,Low,Close,Adj Close,Volume
+                    var yahooParts = line.Split(new[] { "\",", "," }, StringSplitOptions.None);
+                    if (yahooParts.Length >= 6)
+                    {
+                        string dateStr1 = yahooParts[0].Trim('"');
+                        string dateStr2 = yahooParts[1].Trim('"');
+                        string dateStr = $"{dateStr1},{dateStr2}";
+                        if (DateTime.TryParseExact(dateStr.Trim(), new[] { "MMM dd, yyyy", "MMM d, yyyy" }, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime date) &&
+                            double.TryParse(yahooParts[5].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double closePrice))
+                        {
+                            prices[date] = closePrice;
+                            continue;
+                        }
+                    }
+
+                    // Try 7-column standard format with yyyy-MM-dd date
+                    if (parts.Length >= 6)
+                    {
+                        string dateStr = parts[0].Trim();
+                        if (DateTime.TryParseExact(dateStr, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime date) &&
+                            double.TryParse(parts[4].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double closePrice))
                         {
                             prices[date] = closePrice;
                         }

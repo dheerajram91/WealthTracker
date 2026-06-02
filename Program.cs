@@ -15,6 +15,11 @@ builder.Services.AddSingleton<DataProcessHelper>(sp =>
     var mem = sp.GetRequiredService<IMemoryCache>();
     var helper = new DataProcessHelper(mem);
     DataProcessHelper.Instance = helper;
+
+    // Initialize standard CSV path and default URL on startup to trigger symbols/metadata loading
+    var csvPath = Path.Combine(Directory.GetCurrentDirectory(), "Data");
+    DataProcessHelper.Initialize(csvPath, string.Empty);
+
     return helper;
 });
 
