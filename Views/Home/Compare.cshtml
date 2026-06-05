@@ -302,10 +302,12 @@
                     if (k >= 0) {
                         const rescaled = getRescaledResults(latestResults, k);
                         renderChartFromResults(rescaled, currentMode);
+                        renderFormulaTable(rescaled);
                         return;
                     }
                 }
                 renderChartFromResults(latestResults, currentMode);
+                renderFormulaTable(latestResults);
             }
         }
 
@@ -473,9 +475,11 @@
             const table = document.createElement('table');
             table.className = 'table table-sm';
             const thead = document.createElement('thead');
-            thead.innerHTML = '<tr><th>Strategy</th><th>Investment Formula</th></tr>';
+            thead.innerHTML = '<tr><th class="text-white">Strategy</th><th class="text-white">Investment Formula</th><th class="text-white text-end pe-3">XIRR</th></tr>';
             table.appendChild(thead);
             const tbody = document.createElement('tbody');
+
+            const isSip = (currentMode === 'SIP');
 
             for (let i = 0; i < results.length; i++) {
                 const r = results[i];
@@ -489,7 +493,7 @@
                 if (Number.isFinite(aVal)) {
                     formula += `${aVal.toFixed(2)}X`;
                 }
-                if (Number.isFinite(bVal)) {
+                if (isSip && Number.isFinite(bVal)) {
                     if (formula) {
                         formula += (bVal >= 0 ? ` + ${Math.abs(bVal).toFixed(2)}Y` : ` - ${Math.abs(bVal).toFixed(2)}Y`);
                     } else {
@@ -497,13 +501,110 @@
                     }
                 }
 
+                // Calculate XIRR and Invested dynamically on the client side
+                const graph = getGraphArrayForMode(r, currentMode);
+                const cashFlows = getCashFlowsForXirr(graph, isSip);
+                const xirrVal = calculateXirr(cashFlows);
+                const investedVal = isSip ? (100.0 + (graph.length - 1) * 5.0) : 100.0;
+                const months = graph.length - 1;
+
+                const finalVal = graph.length > 0 ? (graph[graph.length - 1].wealth ?? graph[graph.length - 1].Wealth ?? 0) : 0;
+
+                const formulaHtml = isSip 
+                    ? `<span class="text-success">${formula}</span> <span class="text-white">(Invested: </span><span class="text-success">X + ${months}Y</span><span class="text-white">)</span>` 
+                    : `<span class="text-success">${formula}</span> <span class="text-white">(Invested: </span><span class="text-success">X</span><span class="text-white">)</span>`;
+                
+                const valuationHtml = `<span class="text-white">[</span><span class="text-success">${finalVal.toFixed(2)}</span><span class="text-white"> from </span><span class="text-success">${investedVal.toFixed(2)}</span><span class="text-white">]</span>`;
+
                 const tr = document.createElement('tr');
-                tr.innerHTML = `<td>${id}</td><td>${formula}</td>`;
+                tr.innerHTML = `<td>${id}</td>
+                                <td>
+                                    <div class="fw-bold">${formulaHtml}</div>
+                                    <div style="font-size: 0.85rem; opacity: 0.85;">${valuationHtml}</div>
+                                </td>
+                                <td class="text-success text-end pe-3" style="font-size: 0.9rem; vertical-align: middle;">${xirrVal.toFixed(2)}%</td>`;
                 tbody.appendChild(tr);
             }
 
             table.appendChild(tbody);
             coeffContainer.appendChild(table);
+        }
+
+        function getCashFlowsForXirr(graphPoints, isSip) {
+            if (!graphPoints || graphPoints.length === 0) return [];
+            const cashFlows = [];
+            // Initial investment at the start
+            cashFlows.push({
+                date: "01 " + graphPoints[0].month,
+                amount: -100.0
+            });
+            // Monthly additions (for SIP)
+            if (isSip) {
+                for (let i = 1; i < graphPoints.length; i++) {
+                    cashFlows.push({
+                        date: "01 " + graphPoints[i].month,
+                        amount: -5.0
+                    });
+                }
+            }
+            // Final valuation at the end
+            const lastPoint = graphPoints[graphPoints.length - 1];
+            cashFlows.push({
+                date: "01 " + lastPoint.month,
+                amount: lastPoint.wealth
+            });
+            return cashFlows;
+        }
+
+        function calculateXirr(cashFlows) {
+            if (!cashFlows || cashFlows.length < 2) return 0.0;
+            if (cashFlows[cashFlows.length - 1].amount <= 0) return -100.0;
+
+            let low = -0.999;
+            let high = 100.0;
+            const tolerance = 1e-6;
+            const maxIterations = 100;
+
+            let npvLow = calculateNpv(low, cashFlows);
+            let npvHigh = calculateNpv(high, cashFlows);
+
+            if (npvLow * npvHigh > 0) {
+                if (npvLow < 0) return -99.9;
+                if (npvHigh > 0) return 10000.0;
+                return 0.0;
+            }
+
+            let mid = 0.0;
+            for (let i = 0; i < maxIterations; i++) {
+                mid = (low + high) / 2.0;
+                const npvMid = calculateNpv(mid, cashFlows);
+
+                if (Math.abs(npvMid) < tolerance || (high - low) / 2.0 < tolerance) {
+                    return mid * 100.0;
+                }
+
+                if (npvMid * npvLow > 0) {
+                    low = mid;
+                    npvLow = npvMid;
+                } else {
+                    high = mid;
+                    npvHigh = npvMid;
+                }
+            }
+            return mid * 100.0;
+        }
+
+        function calculateNpv(r, cashFlows) {
+            let npv = 0.0;
+            const d1 = new Date(cashFlows[0].date);
+
+            for (let i = 0; i < cashFlows.length; i++) {
+                const cf = cashFlows[i];
+                const d = new Date("01 " + cf.date.replace(/^\d+\s+/, "")); // normalize parsing
+                const t = (d - d1) / (1000 * 60 * 60 * 24 * 365.0);
+                npv += cf.amount / Math.pow(1.0 + r, t);
+            }
+            return npv;
         }
 
         function onStartDateChange(value) {

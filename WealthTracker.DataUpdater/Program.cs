@@ -181,6 +181,21 @@ namespace WealthTracker.DataUpdater
                 var line = lines[i];
                 if (string.IsNullOrWhiteSpace(line)) continue;
 
+                if (line.Contains("XX-XX-XXXX"))
+                {
+                    var partsCash = line.Split(',');
+                    if (partsCash.Length == 2 && double.TryParse(partsCash[1].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double val))
+                    {
+                        var start = new DateTime(2010, 1, 1);
+                        var end = DateTime.Today;
+                        for (var d = start; d <= end; d = d.AddDays(1))
+                        {
+                            list.Add((d, val));
+                        }
+                        return (DateTime.Today, list);
+                    }
+                }
+
                 // Try parsing the 2-column yyyy-MM-dd format first
                 var parts = line.Split(',');
                 if (parts.Length == 2)

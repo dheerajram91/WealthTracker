@@ -149,6 +149,11 @@ namespace WealthTracker.Helper
         {
             if (string.IsNullOrWhiteSpace(line)) return null;
 
+            if (line.Contains("XX-XX-XXXX"))
+            {
+                return new DateTime(2010, 1, 1);
+            }
+
             // Try 2-column yyyy-MM-dd
             var parts = line.Split(',');
             if (parts.Length == 2)
@@ -260,6 +265,21 @@ namespace WealthTracker.Helper
                 {
                     var line = reader.ReadLine();
                     if (string.IsNullOrWhiteSpace(line)) continue;
+
+                    if (line.Contains("XX-XX-XXXX"))
+                    {
+                        var partsCash = line.Split(',');
+                        if (partsCash.Length == 2 && double.TryParse(partsCash[1].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double val))
+                        {
+                            var start = new DateTime(2010, 1, 1);
+                            var end = DateTime.Today;
+                            for (var d = start; d <= end; d = d.AddDays(1))
+                            {
+                                prices[d] = val;
+                            }
+                            return prices;
+                        }
+                    }
 
                     // Try parsing the 2-column yyyy-MM-dd format first
                     var parts = line.Split(',');

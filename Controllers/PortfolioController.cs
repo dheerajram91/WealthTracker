@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Caching.Memory;
 using System;
@@ -131,8 +131,9 @@ namespace WealthTracker.Controllers
             // Coefficient A: Final Value of 1 unit invested at start
             // Coefficient B: Sum of final values of 1 unit invested every month
 
-            // Perform final simulation to get a and b
-            (a, b, graphData, graphDataNoSIP) = compHelper.RunSimulation(sortedPeriods, priceData, 100, 5);
+            // Perform final simulation to get a, b, XIRR, and Invested amounts
+            double xirr, xirrNoSip, invested, investedNoSip;
+            (a, b, graphData, graphDataNoSIP, xirr, xirrNoSip, invested, investedNoSip) = compHelper.RunSimulation(sortedPeriods, priceData, 100, 5);
 
             return Ok(new PortfolioResponse
             {
@@ -141,6 +142,10 @@ namespace WealthTracker.Controllers
                 Polynomial = $"{a:F2}X + {b:F2}Y",
                 GraphData = graphData,
                 GraphDataNoSIP = graphDataNoSIP,
+                Xirr = Math.Round(xirr * 100.0, 2),
+                XirrNoSIP = Math.Round(xirrNoSip * 100.0, 2),
+                Invested = Math.Round(invested, 2),
+                InvestedNoSIP = Math.Round(investedNoSip, 2),
                 ShareCode = EncodeRequest(request)
             });
         }

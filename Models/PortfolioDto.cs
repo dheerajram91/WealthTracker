@@ -1,4 +1,4 @@
-﻿namespace WealthTracker.Models
+namespace WealthTracker.Models
 {
     public class PortfolioItem
     {
@@ -34,6 +34,11 @@
         public List<MonthlyWealthPoint> GraphDataNoSIP { get; set; }
 
         public string ShareCode { get; set; }
+
+        public double Xirr { get; set; }
+        public double XirrNoSIP { get; set; }
+        public double Invested { get; set; }
+        public double InvestedNoSIP { get; set; }
     }
 
     public class CompareRequest
@@ -54,6 +59,11 @@
         public double CoefficientB { get; set; }
         public List<MonthlyWealthPoint> GraphData { get; set; } = new();
         public List<MonthlyWealthPoint> GraphDataNoSIP { get; set; } = new();
+
+        public double Xirr { get; set; }
+        public double XirrNoSIP { get; set; }
+        public double Invested { get; set; }
+        public double InvestedNoSIP { get; set; }
     }
 
 }

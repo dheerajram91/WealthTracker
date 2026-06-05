@@ -20,8 +20,18 @@
     </div>
 
     <div id="resultsArea" class="mt-5" style="display:none;">
-        <h3 class="h4">Investment Formula: <span id="polynomialOutput" class="text-success fw-bold"></span></h3>
-        <p class="text-muted">Where X is the lump‑sum invested at the beginning, and Y is the monthly investment (SIP)</p>
+        <h3 class="h4 d-flex flex-wrap align-items-baseline mb-1 text-white fw-bold">
+            <span id="formulaContainer"></span>
+        </h3>
+        <div id="extraStats" class="d-flex flex-column gap-y-1 text-white mb-2" style="font-size: 0.9rem;">
+            <div>
+                <span>SIP : </span><strong id="sipValue" class="text-success"></strong> from <strong id="sipInvested" class="text-success"></strong> (XIRR : <strong class="text-success"><span id="xirrOutput"></span>%</strong>)
+            </div>
+            <div>
+                <span>No SIP : </span><strong id="noSipValue" class="text-success"></strong> from <strong id="noSipInvested" class="text-success"></strong> (XIRR : <strong class="text-success"><span id="xirrNoSipOutput"></span>%</strong>)
+            </div>
+        </div>
+        <p class="text-muted mb-3">Where X is the lump‑sum invested at the beginning, and Y is the monthly investment (SIP)</p>
         <div class="card mt-3">
             <div class="card-body p-2 p-md-3">
                 <div class="chart-container">
@@ -266,7 +276,26 @@
 
         function renderResults(data) {
             document.getElementById('resultsArea').style.display = 'block';
-            document.getElementById('polynomialOutput').innerText = data.polynomial;
+            
+            const months = data.graphData.length - 1;
+            document.getElementById('formulaContainer').innerHTML = 
+                `<span class="text-white">Investment Formula: </span>` +
+                `<span class="text-success">${data.polynomial}</span>` +
+                `<span class="text-white"> (Invested: </span>` +
+                `<span class="text-success">X + ${months}Y</span>` +
+                `<span class="text-white">)</span>`;
+
+            const finalValSip = data.graphData[data.graphData.length - 1].wealth;
+            const finalValNoSip = data.graphDataNoSIP[data.graphDataNoSIP.length - 1].wealth;
+
+            document.getElementById('sipValue').innerText = finalValSip.toFixed(2);
+            document.getElementById('sipInvested').innerText = data.invested.toFixed(2);
+            document.getElementById('xirrOutput').innerText = data.xirr.toFixed(2);
+
+            document.getElementById('noSipValue').innerText = finalValNoSip.toFixed(2);
+            document.getElementById('noSipInvested').innerText = data.investedNoSIP.toFixed(2);
+            document.getElementById('xirrNoSipOutput').innerText = data.xirrNoSIP.toFixed(2);
+
             document.getElementById('shareSection').style.display = 'block';
 
             // Generate the URL with the share code as a query parameter

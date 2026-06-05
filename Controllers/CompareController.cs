@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -87,7 +87,7 @@ namespace WealthTracker.Controllers
                 var periods = new List<PortfolioPeriod> { period };
 
                 ComputeHelper compHelper = new ComputeHelper(_dataHelper);
-                var (a, b, graphData, graphDataNoSIP) = compHelper.RunSimulation(periods, priceData, 100, 5);
+                var (a, b, graphData, graphDataNoSIP, xirr, xirrNoSip, invested, investedNoSip) = compHelper.RunSimulation(periods, priceData, 100, 5);
 
                 results.Add(new CompareResult
                 {
@@ -95,7 +95,11 @@ namespace WealthTracker.Controllers
                     CoefficientA = Math.Round(a, 4),
                     CoefficientB = Math.Round(b, 4),
                     GraphData = graphData,
-                    GraphDataNoSIP = graphDataNoSIP
+                    GraphDataNoSIP = graphDataNoSIP,
+                    Xirr = Math.Round(xirr * 100.0, 2),
+                    XirrNoSIP = Math.Round(xirrNoSip * 100.0, 2),
+                    Invested = Math.Round(invested, 2),
+                    InvestedNoSIP = Math.Round(investedNoSip, 2)
                 });
             }
 
