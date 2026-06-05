@@ -66,4 +66,15 @@ namespace WealthTracker.Models
         public double InvestedNoSIP { get; set; }
     }
 
+    public class AssetInfo
+    {
+        public string Symbol { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+    }
+
+    public class AssetGroup
+    {
+        public string Group { get; set; } = string.Empty;
+        public List<AssetInfo> Assets { get; set; } = new();
+    }
 }

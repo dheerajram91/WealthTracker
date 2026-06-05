@@ -3,6 +3,7 @@ using Microsoft.Extensions.Caching.Memory;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
+using WealthTracker.Models;
 
 namespace WealthTracker.Helper
 {
@@ -13,22 +14,79 @@ namespace WealthTracker.Helper
         private readonly IMemoryCache _memoryCache;
         private readonly ConcurrentDictionary<string, DateTime> _oldestDataCache = new ConcurrentDictionary<string, DateTime>();
 
-        private static readonly Dictionary<string, string> _symbolDescriptions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        private static readonly List<AssetGroup> _assetGroups = new List<AssetGroup>
         {
-            ["NIFTYBEES"] = "Nifty 50 ETF (India)",
-            ["SENSEXBEES"] = "Sensex ETF (India)",
-            ["FXI"] = "iShares China Large-Cap ETF",
-            ["BTC"] = "Bitcoin (crypto)",
-            ["ETH"] = "Ethereum (crypto)",
-            ["QQQ"] = "Invesco QQQ (Nasdaq-100 ETF)",
-            ["IXN"] = "iShares Global Tech ETF",
-            ["IAU"] = "iShares Gold Trust",
-            ["SLV"] = "iShares Silver Trust",
-            ["DIA"] = "SPDR Dow Jones Industrial Average ETF",
-            ["VOO"] = "Vanguard S&P 500 ETF",
-            ["CASH"] = "Cash / Stable"
+            new AssetGroup {
+                Group = "India",
+                Assets = new List<AssetInfo> {
+                    new AssetInfo { Symbol = "NIFTYBEES", Description = "Nifty 50 ETF (India)" },
+                    new AssetInfo { Symbol = "SENSEXBEES", Description = "Sensex ETF (India)" }
+                }
+            },
+            new AssetGroup {
+                Group = "US Tech",
+                Assets = new List<AssetInfo> {
+                    new AssetInfo { Symbol = "QQQ", Description = "Invesco QQQ (Nasdaq-100 ETF)" }
+                }
+            },
+            new AssetGroup {
+                Group = "Global Tech",
+                Assets = new List<AssetInfo> {
+                    new AssetInfo { Symbol = "IXN", Description = "iShares Global Tech ETF" }
+                }
+            },
+            new AssetGroup {
+                Group = "US",
+                Assets = new List<AssetInfo> {
+                    new AssetInfo { Symbol = "VOO", Description = "Vanguard S&P 500 ETF" },
+                    new AssetInfo { Symbol = "DIA", Description = "SPDR Dow Jones Industrial Average ETF" }
+                }
+            },
+            new AssetGroup {
+                Group = "Global",
+                Assets = new List<AssetInfo> {
+                    new AssetInfo { Symbol = "VEA", Description = "Vanguard FTSE Developed Markets Index Fund ETF" },
+                    new AssetInfo { Symbol = "FXI", Description = "iShares China Large-Cap ETF" }
+                }
+            },
+            new AssetGroup {
+                Group = "Commodity",
+                Assets = new List<AssetInfo> {
+                    new AssetInfo { Symbol = "IAU", Description = "iShares Gold Trust" },
+                    new AssetInfo { Symbol = "SLV", Description = "iShares Silver Trust" }
+                }
+            },
+            new AssetGroup {
+                Group = "Crypto",
+                Assets = new List<AssetInfo> {
+                    new AssetInfo { Symbol = "BTC", Description = "Bitcoin (crypto)" },
+                    new AssetInfo { Symbol = "ETH", Description = "Ethereum (crypto)" }
+                }
+            },
+            new AssetGroup {
+                Group = "Cash",
+                Assets = new List<AssetInfo> {
+                    new AssetInfo { Symbol = "CASH", Description = "Cash / Stable" }
+                }
+            }
         };
 
+        private static readonly Dictionary<string, string> _symbolDescriptions = InitializeDefaultDescriptions();
+
+        private static Dictionary<string, string> InitializeDefaultDescriptions()
+        {
+            var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var g in _assetGroups)
+            {
+                foreach (var a in g.Assets)
+                {
+                    dict[a.Symbol] = a.Description;
+                }
+            }
+            return dict;
+        }
+
+        public static List<AssetGroup> AssetGroups => _assetGroups;
         public static Dictionary<string, string> SymbolDescriptions => _symbolDescriptions;
         public static List<string> AllowedSymbols => _symbolDescriptions.Keys.ToList();
 
@@ -59,13 +117,19 @@ namespace WealthTracker.Helper
                 try
                 {
                     var json = System.IO.File.ReadAllText(jsonPath);
-                    var dict = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
-                    if (dict != null)
+                    var groups = JsonSerializer.Deserialize<List<AssetGroup>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    if (groups != null && groups.Any())
                     {
+                        _assetGroups.Clear();
+                        _assetGroups.AddRange(groups);
+
                         _symbolDescriptions.Clear();
-                        foreach (var kvp in dict)
+                        foreach (var g in groups)
                         {
-                            _symbolDescriptions[kvp.Key] = kvp.Value;
+                            foreach (var a in g.Assets)
+                            {
+                                _symbolDescriptions[a.Symbol] = a.Description;
+                            }
                         }
                     }
                 }
@@ -79,13 +143,20 @@ namespace WealthTracker.Helper
             if (System.IO.Directory.Exists(_csvPath))
             {
                 var files = System.IO.Directory.GetFiles(_csvPath, "*.csv");
+                var otherAssets = new List<AssetInfo>();
                 foreach (var file in files)
                 {
                     var sym = Path.GetFileNameWithoutExtension(file).ToUpperInvariant();
                     if (!_symbolDescriptions.ContainsKey(sym))
                     {
-                        _symbolDescriptions[sym] = $"{sym} Asset";
+                        var desc = $"{sym} Asset";
+                        _symbolDescriptions[sym] = desc;
+                        otherAssets.Add(new AssetInfo { Symbol = sym, Description = desc });
                     }
+                }
+                if (otherAssets.Any())
+                {
+                    _assetGroups.Add(new AssetGroup { Group = "Other Assets", Assets = otherAssets });
                 }
             }
         }

@@ -1,15 +1,55 @@
-{
-  "NIFTYBEES": "Nifty 50 ETF (India)",
-  "SENSEXBEES": "Sensex ETF (India)",
-  "FXI": "iShares China Large-Cap ETF",
-  "BTC": "Bitcoin (crypto)",
-  "ETH": "Ethereum (crypto)",
-  "QQQ": "Invesco QQQ (Nasdaq-100 ETF)",
-  "IXN": "iShares Global Tech ETF",
-  "VEA": "Vanguard FTSE Developed Markets Index Fund ETF",
-  "IAU": "iShares Gold Trust",
-  "SLV": "iShares Silver Trust",
-  "DIA": "SPDR Dow Jones Industrial Average ETF",
-  "VOO": "Vanguard S&P 500 ETF",
-  "CASH": "Cash / Stable"
-}
+[
+  {
+    "Group": "India",
+    "Assets": [
+      { "Symbol": "NIFTYBEES", "Description": "Nifty 50 ETF (India)" },
+      { "Symbol": "SENSEXBEES", "Description": "Sensex ETF (India)" }
+    ]
+  },
+  {
+    "Group": "US Tech",
+    "Assets": [
+      { "Symbol": "QQQ", "Description": "Invesco QQQ (Nasdaq-100 ETF)" }
+    ]
+  },
+  {
+    "Group": "Global Tech",
+    "Assets": [
+      { "Symbol": "IXN", "Description": "iShares Global Tech ETF" }
+    ]
+  },
+  {
+    "Group": "US",
+    "Assets": [
+      { "Symbol": "VOO", "Description": "Vanguard S&P 500 ETF" },
+      { "Symbol": "DIA", "Description": "SPDR Dow Jones Industrial Average ETF" }
+    ]
+  },
+  {
+    "Group": "Global",
+    "Assets": [
+      { "Symbol": "VEA", "Description": "Vanguard FTSE Developed Markets Index Fund ETF" },
+      { "Symbol": "FXI", "Description": "iShares China Large-Cap ETF" }
+    ]
+  },
+  {
+    "Group": "Commodity",
+    "Assets": [
+      { "Symbol": "IAU", "Description": "iShares Gold Trust" },
+      { "Symbol": "SLV", "Description": "iShares Silver Trust" }
+    ]
+  },
+  {
+    "Group": "Crypto",
+    "Assets": [
+      { "Symbol": "BTC", "Description": "Bitcoin (crypto)" },
+      { "Symbol": "ETH", "Description": "Ethereum (crypto)" }
+    ]
+  },
+  {
+    "Group": "Cash",
+    "Assets": [
+      { "Symbol": "CASH", "Description": "Cash / Stable" }
+    ]
+  }
+]

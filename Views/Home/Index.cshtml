@@ -6,7 +6,10 @@
 }
 
 <div class="container mt-4">
-    <h2>Portfolio Simulation</h2>
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h2 class="mb-0">Portfolio Simulation</h2>
+        <button type="button" class="btn btn-outline-info" onclick="loadAiPortfolio()">✨ AI Suggested Portfolio</button>
+    </div>
     <hr />
 
     <div id="periodsContainer">
@@ -72,14 +75,38 @@
 
 <template id="itemTemplate">
     <div class="row mb-2 item-row">
-        <div class="col-md-6">
-            <select class="form-control symbol-select">
-                @foreach (var sym in allowedSymbols)
+        <div class="col-md-6 position-relative">
+            <!-- Hidden select that existing JS reads/writes -->
+            <select class="form-select symbol-select d-none">
+                @foreach (var grp in DataProcessHelper.AssetGroups)
                 {
-                    var desc = symbolDescriptions.ContainsKey(sym) ? symbolDescriptions[sym] : string.Empty;
-                    <option value="@sym" data-desc="@desc">@sym@if(!string.IsNullOrEmpty(desc)){<text> - @desc</text>}</option>
+                    <optgroup label="@grp.Group">
+                        @foreach (var asset in grp.Assets)
+                        {
+                            <option value="@asset.Symbol" data-desc="@asset.Description">@asset.Symbol - @asset.Description</option>
+                        }
+                    </optgroup>
                 }
             </select>
+            <!-- Custom dropdown UI -->
+            <div class="custom-dropdown">
+                <div class="custom-dropdown-trigger form-select d-flex justify-content-between align-items-center" onclick="toggleDropdown(this)">
+                    <span class="custom-dropdown-text">Select Asset...</span>
+                    <span class="custom-dropdown-arrow"></span>
+                </div>
+                <div class="custom-dropdown-menu" style="display: none;">
+                    @foreach (var grp in DataProcessHelper.AssetGroups)
+                    {
+                        <div class="custom-dropdown-group-label">@grp.Group</div>
+                        @foreach (var asset in grp.Assets)
+                        {
+                            <div class="custom-dropdown-option" data-value="@asset.Symbol" data-desc="@asset.Description" onclick="selectOption(this)">
+                                <span class="option-sym">@asset.Symbol</span><span class="option-desc"> - @asset.Description</span>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
         </div>
         <div class="col-md-4">
             <input type="number" class="form-control percentage-input" placeholder="Percentage (%)" min="0" max="100">
@@ -150,10 +177,9 @@
                         const itemTemplate = document.getElementById('itemTemplate').content.cloneNode(true);
                         const itemRow = itemTemplate.querySelector('.item-row');
 
-                        itemRow.querySelector('.symbol-select').value = symbol;
                         itemRow.querySelector('.percentage-input').value = percentage;
-
                         itemsContainer.appendChild(itemRow);
+                        setSelectValue(itemRow, symbol);
                     }
                 });
 
@@ -180,6 +206,10 @@
             const container = button.previousElementSibling;
             const template = document.getElementById('itemTemplate').content.cloneNode(true);
             container.appendChild(template);
+            
+            const lastRow = container.lastElementChild;
+            const select = lastRow.querySelector('.symbol-select');
+            setSelectValue(lastRow, select.value);
         }
 
         function showFormError(message) {
@@ -368,6 +398,91 @@
             if (chartInstance) {
                 chartInstance.resize();
             }
+        }
+
+        // Custom Dropdown Helper Functions
+        function setSelectValue(rowElement, symbol) {
+            const select = rowElement.querySelector('.symbol-select');
+            select.value = symbol;
+            
+            const option = select.querySelector(`option[value="${symbol}"]`);
+            const desc = option ? option.getAttribute('data-desc') : '';
+            
+            const textSpan = rowElement.querySelector('.custom-dropdown-text');
+            if (textSpan) {
+                textSpan.innerText = option ? `${symbol} - ${desc}` : 'Select Asset...';
+            }
+            
+            const customOptions = rowElement.querySelectorAll('.custom-dropdown-option');
+            customOptions.forEach(opt => {
+                if (opt.getAttribute('data-value') === symbol) {
+                    opt.classList.add('active');
+                } else {
+                    opt.classList.remove('active');
+                }
+            });
+        }
+
+        function toggleDropdown(triggerElement) {
+            document.querySelectorAll('.custom-dropdown-menu').forEach(menu => {
+                if (menu !== triggerElement.nextElementSibling) {
+                    menu.style.display = 'none';
+                }
+            });
+            
+            const menu = triggerElement.nextElementSibling;
+            if (menu.style.display === 'none') {
+                menu.style.display = 'block';
+                const active = menu.querySelector('.custom-dropdown-option.active');
+                if (active) {
+                    active.scrollIntoView({ block: 'nearest' });
+                }
+            } else {
+                menu.style.display = 'none';
+            }
+        }
+
+        function selectOption(optionElement) {
+            const val = optionElement.getAttribute('data-value');
+            const row = optionElement.closest('.item-row');
+            setSelectValue(row, val);
+            optionElement.closest('.custom-dropdown-menu').style.display = 'none';
+        }
+
+        document.addEventListener('click', function(event) {
+            if (!event.target.closest('.custom-dropdown')) {
+                document.querySelectorAll('.custom-dropdown-menu').forEach(menu => {
+                    menu.style.display = 'none';
+                });
+            }
+        });
+
+        function loadAiPortfolio() {
+            const today = new Date().toISOString().split('T')[0];
+            const request = {
+                Periods: [{
+                    StartDate: "2018-01-01T00:00:00",
+                    EndDate: today + "T00:00:00",
+                    Items: {
+                        NIFTYBEES: 20,
+                        SENSEXBEES: 20,
+                        QQQ: 15,
+                        IXN: 10,
+                        VOO: 10,
+                        VEA: 10,
+                        IAU: 5,
+                        SLV: 3,
+                        BTC: 3,
+                        ETH: 2,
+                        FXI: 1,
+                        CASH: 1
+                    }
+                }]
+            };
+            const jsonStr = JSON.stringify(request);
+            const base64 = btoa(jsonStr);
+            const base64url = base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            window.location.href = window.location.pathname + "?code=" + base64url;
         }
     </script>
 }
