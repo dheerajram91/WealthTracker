@@ -18,11 +18,43 @@
 
     <div class="mt-3">
         <button type="button" class="btn btn-secondary" onclick="addStrategy()">+ Add Strategy</button>
-        <button type="button" class="btn btn-primary" onclick="submitCompare()">Compare</button>
+        <button type="button" id="compareBtn" class="btn btn-primary" onclick="submitCompare()">Compare</button>
     </div>
 
     <div id="resultsArea" class="mt-5" style="display:none;">
-        <h3 class="h4 mb-3">Comparison Results</h3>
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-2">
+            <h4 class="mb-0 text-white fw-bold">Investment Formulas</h4>
+            
+            <div class="d-flex align-items-center gap-3">
+                <!-- Start Date dropdown -->
+                <div class="d-flex align-items-center">
+                    <span class="text-muted me-2" style="font-size: 0.85rem; font-weight: 600;">Filter Start Date:</span>
+                    <select id="customStartDateSelect" class="d-none" onchange="onStartDateChange(this.value)">
+                        <option value="">Default (Oldest Available)</option>
+                    </select>
+                    <div class="custom-dropdown" id="dateFilterDropdown" style="width: 220px;">
+                        <div class="custom-dropdown-trigger form-select d-flex justify-content-between align-items-center" style="height: 38px; padding-top: 0.35rem; padding-bottom: 0.35rem; font-size: 0.9rem;" onclick="toggleDropdown(this)">
+                            <span class="custom-dropdown-text">Default (Oldest Available)</span>
+                            <span class="custom-dropdown-arrow"></span>
+                        </div>
+                        <div class="custom-dropdown-menu" id="dateFilterMenu" style="display: none; max-height: 250px;">
+                            <div class="custom-dropdown-option active" data-value="" onclick="selectDateOption(this)">Default (Oldest Available)</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Toggle slider between SIP and NO SIP -->
+                <div class="d-flex align-items-center bg-input px-3 rounded-pill border border-color" style="height: 38px;">
+                    <span id="noSipLabel" class="me-2" style="font-size: 0.85rem;">NO SIP</span>
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="sipToggle" checked onchange="onSIPToggle(this.checked)" role="switch" aria-checked="true" aria-label="Toggle SIP mode">
+                    </div>
+                    <span id="sipLabel" class="ms-2 fw-bold" style="font-size: 0.85rem;">SIP</span>
+                </div>
+            </div>
+        </div>
+        <p class="text-muted mb-3" style="font-size: 0.85rem;">Where X is the lump‑sum invested at the beginning, and Y is the monthly investment (SIP)</p>
+
         <div id="coefficients" class="mb-4"></div>
  
         <div class="card mb-4">
@@ -34,28 +66,6 @@
         </div>
  
         <p class="text-muted"><strong>Period:</strong> <span id="periodRange" class="text-white"></span></p>
-
-        <!-- Custom Start Date dropdown and Toggle slider side by side -->
-        <div class="mb-3 d-flex flex-wrap align-items-center gap-4">
-            <!-- Start Date dropdown -->
-            <div class="d-flex align-items-center">
-                <label for="customStartDateSelect" class="me-2 fw-bold">Filter Start Date:</label>
-                <select id="customStartDateSelect" class="form-select d-inline-block w-auto" onchange="onStartDateChange(this.value)">
-                    <option value="">Default (Oldest Available)</option>
-                </select>
-            </div>
-
-            <!-- Toggle slider between SIP and NO SIP -->
-            <div class="d-flex align-items-center">
-                <span id="noSipLabel" class="me-2">NO SIP</span>
-
-                <div class="form-check form-switch mx-2">
-                    <input class="form-check-input" type="checkbox" id="sipToggle" checked onchange="onSIPToggle(this.checked)" role="switch" aria-checked="true" aria-label="Toggle SIP mode">
-                </div>
-
-                <span id="sipLabel" class="ms-2 fw-bold">SIP</span>
-            </div>
-        </div>
     </div>
 </div>
 
@@ -287,6 +297,14 @@
 
             const requestBody = { CompareItems: compareItems };
 
+            const compBtn = document.getElementById('compareBtn');
+            const originalText = compBtn.innerHTML;
+            compBtn.disabled = true;
+            compBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Comparing...`;
+
+            // Hide previous results during new calculation
+            document.getElementById('resultsArea').style.display = 'none';
+
             try {
                 const response = await fetch('/compare', {
                     method: 'POST',
@@ -305,6 +323,9 @@
             } catch (err) {
                 console.error("Fetch error:", err);
                 showFormError("Failed to communicate with the server. Check your network connection.");
+            } finally {
+                compBtn.disabled = false;
+                compBtn.innerHTML = originalText;
             }
         }
 
@@ -477,16 +498,31 @@
                 // Populate custom start date dropdown
                 const firstGraph = getGraphArrayForMode(results[0] || {}, 'SIP');
                 const labels = firstGraph.map(d => d.month || d.Month);
+                
                 const select = document.getElementById('customStartDateSelect');
                 select.innerHTML = '<option value="">Default (Oldest Available)</option>';
+                
+                const menu = document.getElementById('dateFilterMenu');
+                menu.innerHTML = '<div class="custom-dropdown-option active" data-value="" onclick="selectDateOption(this)">Default (Oldest Available)</div>';
+
                 labels.forEach((label, idx) => {
                     if (idx < labels.length - 1) { // Skip the last month because simulation requires at least 2 points
                         const opt = document.createElement('option');
                         opt.value = label;
                         opt.innerText = label;
                         select.appendChild(opt);
+
+                        const div = document.createElement('div');
+                        div.className = 'custom-dropdown-option';
+                        div.setAttribute('data-value', label);
+                        div.innerText = label;
+                        div.onclick = function() { selectDateOption(this); };
+                        menu.appendChild(div);
                     }
                 });
+
+                const triggerText = document.querySelector('#dateFilterDropdown .custom-dropdown-text');
+                if (triggerText) triggerText.innerText = 'Default (Oldest Available)';
 
                 // Build formulas table and render chart
                 renderFormulaTable(results);
@@ -503,7 +539,7 @@
 
         function renderFormulaTable(results) {
             const coeffContainer = document.getElementById('coefficients');
-            coeffContainer.innerHTML = '<h4>Investment Formulas</h4><h5>Where X is the lump‑sum invested at the beginning, and Y is the monthly investment (SIP)</h5>';
+            coeffContainer.innerHTML = '';
 
             const table = document.createElement('table');
             table.className = 'table table-sm';
@@ -513,6 +549,7 @@
             const tbody = document.createElement('tbody');
 
             const isSip = (currentMode === 'SIP');
+            const themeColor = isSip ? '#f97316' : '#eab308';
 
             for (let i = 0; i < results.length; i++) {
                 const r = results[i];
@@ -544,10 +581,10 @@
                 const finalVal = graph.length > 0 ? (graph[graph.length - 1].wealth ?? graph[graph.length - 1].Wealth ?? 0) : 0;
 
                 const formulaHtml = isSip 
-                    ? `<span class="text-success">${formula}</span> <span class="text-white">(Invested: </span><span class="text-success">X + ${months}Y</span><span class="text-white">)</span>` 
-                    : `<span class="text-success">${formula}</span> <span class="text-white">(Invested: </span><span class="text-success">X</span><span class="text-white">)</span>`;
+                    ? `<span style="color: ${themeColor};">${formula}</span> <span class="text-white">(Invested: </span><span style="color: ${themeColor};">X + ${months}Y</span><span class="text-white">)</span>` 
+                    : `<span style="color: ${themeColor};">${formula}</span> <span class="text-white">(Invested: </span><span style="color: ${themeColor};">X</span><span class="text-white">)</span>`;
                 
-                const valuationHtml = `<span class="text-white">[</span><span class="text-success">${finalVal.toFixed(2)}</span><span class="text-white"> from </span><span class="text-success">${investedVal.toFixed(2)}</span><span class="text-white">]</span>`;
+                const valuationHtml = `<span class="text-white">[</span><span style="color: ${themeColor};">${finalVal.toFixed(2)}</span><span class="text-white"> from </span><span style="color: ${themeColor};">${investedVal.toFixed(2)}</span><span class="text-white">]</span>`;
 
                 const tr = document.createElement('tr');
                 tr.innerHTML = `<td>${id}</td>
@@ -555,7 +592,7 @@
                                     <div class="fw-bold">${formulaHtml}</div>
                                     <div style="font-size: 0.85rem; opacity: 0.85;">${valuationHtml}</div>
                                 </td>
-                                <td class="text-success text-end pe-3" style="font-size: 0.9rem; vertical-align: middle;">${xirrVal.toFixed(2)}%</td>`;
+                                <td class="text-end pe-3" style="color: ${themeColor}; font-size: 0.9rem; vertical-align: middle;">${xirrVal.toFixed(2)}%</td>`;
                 tbody.appendChild(tr);
             }
 
@@ -748,6 +785,38 @@
             if (dropdown) dropdown.classList.remove('dropup');
             const card = menu.closest('.card');
             if (card) card.style.zIndex = '';
+        }
+
+        function selectDateOption(optionElement) {
+            const val = optionElement.getAttribute('data-value');
+            const dropdown = optionElement.closest('.custom-dropdown');
+            
+            const textSpan = dropdown.querySelector('.custom-dropdown-text');
+            if (textSpan) {
+                textSpan.innerText = optionElement.innerText;
+            }
+            
+            dropdown.querySelectorAll('.custom-dropdown-option').forEach(opt => {
+                if (opt === optionElement) {
+                    opt.classList.add('active');
+                } else {
+                    opt.classList.remove('active');
+                }
+            });
+            
+            const menu = dropdown.querySelector('.custom-dropdown-menu');
+            if (menu) {
+                menu.style.display = 'none';
+            }
+            dropdown.classList.remove('dropup');
+            const card = dropdown.closest('.card');
+            if (card) card.style.zIndex = '';
+            
+            const select = document.getElementById('customStartDateSelect');
+            if (select) {
+                select.value = val;
+                onStartDateChange(val);
+            }
         }
 
         document.addEventListener('click', function(event) {

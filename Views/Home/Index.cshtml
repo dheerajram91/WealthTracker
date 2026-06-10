@@ -19,19 +19,27 @@
 
     <div class="mt-3">
         <button type="button" class="btn btn-secondary" onclick="addPeriod()">+ Add Period</button>
-        <button type="button" class="btn btn-primary" onclick="submitPortfolio()">Calculate Portfolio</button>
+        <button type="button" id="calculateBtn" class="btn btn-primary" onclick="submitPortfolio()">Calculate Portfolio</button>
     </div>
 
     <div id="resultsArea" class="mt-5" style="display:none;">
-        <h3 class="h4 d-flex flex-wrap align-items-baseline mb-1 text-white fw-bold">
-            <span id="formulaContainer"></span>
-        </h3>
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
+            <h3 class="h4 mb-0 text-white fw-bold">
+                <span id="formulaContainer"></span>
+            </h3>
+            <div class="d-flex align-items-center bg-input px-3 py-1.5 rounded-pill border border-color" style="height: 38px;">
+                <span class="text-muted me-2" style="font-size: 0.85rem; font-weight: 600;">Future Projection (3Y)</span>
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" id="projectionToggle" onchange="toggleProjection(this.checked)" role="switch" aria-label="Toggle future projection" checked>
+                </div>
+            </div>
+        </div>
         <div id="extraStats" class="d-flex flex-column gap-y-1 text-white mb-2" style="font-size: 0.9rem;">
             <div>
-                <span>SIP : </span><strong id="sipValue" class="text-success"></strong> from <strong id="sipInvested" class="text-success"></strong> (XIRR : <strong class="text-success"><span id="xirrOutput"></span>%</strong>)
+                <span>SIP : </span><strong id="sipValue" style="color: #f97316;"></strong> from <strong id="sipInvested" style="color: #f97316;"></strong> (XIRR : <strong style="color: #f97316;"><span id="xirrOutput"></span>%</strong>)
             </div>
             <div>
-                <span>No SIP : </span><strong id="noSipValue" class="text-success"></strong> from <strong id="noSipInvested" class="text-success"></strong> (XIRR : <strong class="text-success"><span id="xirrNoSipOutput"></span>%</strong>)
+                <span>No SIP : </span><strong id="noSipValue" style="color: #eab308;"></strong> from <strong id="noSipInvested" style="color: #eab308;"></strong> (XIRR : <strong style="color: #eab308;"><span id="xirrNoSipOutput"></span>%</strong>)
             </div>
         </div>
         <p class="text-muted mb-3">Where X is the lump‑sum invested at the beginning, and Y is the monthly investment (SIP)</p>
@@ -126,6 +134,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
         let chartInstance = null;
+        let latestPortfolioData = null;
 
         // Add a new period on page load
         //document.addEventListener("DOMContentLoaded", () => addPeriod());
@@ -166,9 +175,16 @@
 
                     const lastPeriod = container.lastElementChild;
 
-                    // Set Dates
-                    const startDate = period.startDate.split('T')[0];
-                    const endDate = period.endDate.split('T')[0];
+                    // Set Dates in DD-MM-YYYY format
+                    const startDateRaw = period.startDate.split('T')[0];
+                    const endDateRaw = period.endDate.split('T')[0];
+                    
+                    const startParts = startDateRaw.split('-');
+                    const endParts = endDateRaw.split('-');
+                    
+                    const startDate = `${startParts[2]}-${startParts[1]}-${startParts[0]}`;
+                    const endDate = `${endParts[2]}-${endParts[1]}-${endParts[0]}`;
+
                     lastPeriod.querySelector('.start-date').value = startDate;
                     lastPeriod.querySelector('.end-date').value = endDate;
 
@@ -199,9 +215,14 @@
         }
 
         function initDatePicker(parent) {
-            flatpickr(parent.querySelectorAll('.start-date, .end-date'), {
-                dateFormat: 'Y-m-d',
-                disableMobile: "true"
+            parent.querySelectorAll('.start-date, .end-date').forEach(el => {
+                const val = el.value;
+                flatpickr(el, {
+                    dateFormat: 'd-m-Y',
+                    allowInput: true,
+                    disableMobile: "true",
+                    defaultDate: val ? val : null
+                });
             });
         }
 
@@ -241,27 +262,50 @@
             err.style.display = 'none';
         }
 
+        function getIsoDate(inputEl) {
+            const fp = inputEl._flatpickr;
+            if (fp && fp.selectedDates[0]) {
+                return fp.formatDate(fp.selectedDates[0], 'Y-m-d');
+            }
+            const val = inputEl.value;
+            if (!val) return '';
+            const parts = val.split('-');
+            if (parts.length === 3) {
+                const d = parseInt(parts[0], 10);
+                const m = parseInt(parts[1], 10);
+                const y = parseInt(parts[2], 10);
+                if (!isNaN(d) && !isNaN(m) && !isNaN(y) && d >= 1 && d <= 31 && m >= 1 && m <= 12 && y >= 1000) {
+                    const dt = new Date(y, m - 1, d);
+                    if (dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d) {
+                        const monthStr = String(m).padStart(2, '0');
+                        const dayStr = String(d).padStart(2, '0');
+                        return `${y}-${monthStr}-${dayStr}`;
+                    }
+                }
+            }
+            return '';
+        }
+
         async function submitPortfolio() {
             clearFormError();
 
             const periods = [];
             const periodElements = document.querySelectorAll('.period-entry');
-
             // Client-side validation to give clean, user-friendly messages
             for (let i = 0; i < periodElements.length; i++) {
                 const el = periodElements[i];
-                const startVal = el.querySelector('.start-date').value;
-                const endVal = el.querySelector('.end-date').value;
+                const startVal = getIsoDate(el.querySelector('.start-date'));
+                const endVal = getIsoDate(el.querySelector('.end-date'));
 
                 if (!startVal || !endVal) {
-                    showFormError(`Please fill both Start Date and End Date for period #${i + 1}.`);
+                    showFormError(`Please fill both Start Date and End Date for period #${i + 1} with a valid date (DD-MM-YYYY).`);
                     return;
                 }
 
                 const startDate = new Date(startVal);
                 const endDate = new Date(endVal);
                 if (isNaN(startDate) || isNaN(endDate)) {
-                    showFormError(`Invalid date format for period #${i + 1}. Use yyyy-mm-dd.`);
+                    showFormError(`Invalid date format for period #${i + 1}. Use DD-MM-YYYY.`);
                     return;
                 }
 
@@ -298,6 +342,14 @@
 
             const requestBody = { Periods: periods };
 
+            const calcBtn = document.getElementById('calculateBtn');
+            const originalText = calcBtn.innerHTML;
+            calcBtn.disabled = true;
+            calcBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Calculating...`;
+            
+            // Hide previous results during new calculation
+            document.getElementById('resultsArea').style.display = 'none';
+
             try {
                 const response = await fetch('/portfolio', {
                     method: 'POST',
@@ -316,18 +368,22 @@
             } catch (error) {
                 console.error("Fetch error:", error);
                 showFormError("Failed to communicate with the server. Check your network connection and try again.");
+            } finally {
+                calcBtn.disabled = false;
+                calcBtn.innerHTML = originalText;
             }
         }
 
         function renderResults(data) {
+            latestPortfolioData = data;
             document.getElementById('resultsArea').style.display = 'block';
             
             const months = data.graphData.length - 1;
             document.getElementById('formulaContainer').innerHTML = 
                 `<span class="text-white">Investment Formula: </span>` +
-                `<span class="text-success">${data.polynomial}</span>` +
+                `<span style="color: #f97316;">${data.polynomial}</span>` +
                 `<span class="text-white"> (Invested: </span>` +
-                `<span class="text-success">X + ${months}Y</span>` +
+                `<span style="color: #f97316;">X + ${months}Y</span>` +
                 `<span class="text-white">)</span>`;
 
             const finalValSip = data.graphData[data.graphData.length - 1].wealth;
@@ -347,9 +403,211 @@
             const shareUrl = window.location.origin + window.location.pathname + "?code=" + data.shareCode;
             document.getElementById('shareLink').innerText = shareUrl;
 
-            const labels = data.graphData.map(d => d.month);
-            const values = data.graphData.map(d => d.wealth);
-            const values2 = data.graphDataNoSIP.map(d => d.wealth);
+            const showProjection = document.getElementById('projectionToggle')?.checked;
+            let labels = data.graphData.map(d => d.month);
+            let datasets = [];
+
+            if (showProjection) {
+                // Calculate 3-year XIRR for SIP (or whole period if < 3 years)
+                const graphData = data.graphData;
+                let startIdx = Math.max(0, graphData.length - 37);
+                let cfsSip = [];
+                cfsSip.push({
+                    date: "01 " + graphData[startIdx].month,
+                    amount: -graphData[startIdx].wealth
+                });
+                for (let i = startIdx + 1; i < graphData.length; i++) {
+                    cfsSip.push({
+                        date: "01 " + graphData[i].month,
+                        amount: -5.0 // monthly SIP
+                    });
+                }
+                cfsSip[cfsSip.length - 1].amount += graphData[graphData.length - 1].wealth;
+                const xirrSip = calculateXirr(cfsSip);
+                let rSip = xirrSip / 100.0;
+                if (isNaN(rSip)) rSip = 0.10;
+                rSip = Math.max(-0.5, Math.min(1.0, rSip));
+
+                // Calculate 3-year XIRR for No-SIP
+                const graphDataNoSIP = data.graphDataNoSIP;
+                let startIdxNoSip = Math.max(0, graphDataNoSIP.length - 37);
+                let cfsNoSip = [];
+                cfsNoSip.push({
+                    date: "01 " + graphDataNoSIP[startIdxNoSip].month,
+                    amount: -graphDataNoSIP[startIdxNoSip].wealth
+                });
+                for (let i = startIdxNoSip + 1; i < graphDataNoSIP.length; i++) {
+                    cfsNoSip.push({
+                        date: "01 " + graphDataNoSIP[i].month,
+                        amount: 0.0 // no SIP
+                    });
+                }
+                cfsNoSip[cfsNoSip.length - 1].amount += graphDataNoSIP[graphDataNoSIP.length - 1].wealth;
+                const xirrNoSip = calculateXirr(cfsNoSip);
+                let rNoSip = xirrNoSip / 100.0;
+                if (isNaN(rNoSip)) rNoSip = 0.10;
+                rNoSip = Math.max(-0.5, Math.min(1.0, rNoSip));
+
+                // Project 3 years (36 months)
+                const currentMonth = graphData[graphData.length - 1].month;
+                const currentSipWealth = graphData[graphData.length - 1].wealth;
+                const currentNoSipWealth = graphDataNoSIP[graphDataNoSIP.length - 1].wealth;
+
+                const monthlyRateSip = Math.pow(1.0 + rSip, 1/12) - 1.0;
+                const monthlyRateNoSip = Math.pow(1.0 + rNoSip, 1/12) - 1.0;
+
+                const rSipUpper = rSip + 0.06; // expected + 6%
+                const rSipLower = rSip - 0.06; // expected - 6%
+                const monthlyRateSipUpper = Math.pow(1.0 + rSipUpper, 1/12) - 1.0;
+                const monthlyRateSipLower = Math.pow(1.0 + rSipLower, 1/12) - 1.0;
+
+                const rNoSipUpper = rNoSip + 0.06; // expected + 6%
+                const rNoSipLower = rNoSip - 0.06; // expected - 6%
+                const monthlyRateNoSipUpper = Math.pow(1.0 + rNoSipUpper, 1/12) - 1.0;
+                const monthlyRateNoSipLower = Math.pow(1.0 + rNoSipLower, 1/12) - 1.0;
+
+                let projectedLabels = [];
+                let projectedSip = [];
+                let projectedNoSip = [];
+                let projectedSipUpper = [];
+                let projectedSipLower = [];
+                let projectedNoSipUpper = [];
+                let projectedNoSipLower = [];
+
+                let tempMonth = currentMonth;
+                let tempSip = currentSipWealth;
+                let tempNoSip = currentNoSipWealth;
+                let tempSipUpper = currentSipWealth;
+                let tempSipLower = currentSipWealth;
+                let tempNoSipUpper = currentNoSipWealth;
+                let tempNoSipLower = currentNoSipWealth;
+
+                for (let i = 1; i <= 36; i++) {
+                    tempMonth = getNextMonth(tempMonth);
+                    tempSip = tempSip * (1.0 + monthlyRateSip) + 5.0;
+                    tempNoSip = tempNoSip * (1.0 + monthlyRateNoSip);
+                    tempSipUpper = tempSipUpper * (1.0 + monthlyRateSipUpper) + 5.0;
+                    tempSipLower = tempSipLower * (1.0 + monthlyRateSipLower) + 5.0;
+                    tempNoSipUpper = tempNoSipUpper * (1.0 + monthlyRateNoSipUpper);
+                    tempNoSipLower = tempNoSipLower * (1.0 + monthlyRateNoSipLower);
+
+                    projectedLabels.push(tempMonth);
+                    projectedSip.push(Math.round(tempSip * 100) / 100);
+                    projectedNoSip.push(Math.round(tempNoSip * 100) / 100);
+                    projectedSipUpper.push(Math.round(tempSipUpper * 100) / 100);
+                    projectedSipLower.push(Math.round(tempSipLower * 100) / 100);
+                    projectedNoSipUpper.push(Math.round(tempNoSipUpper * 100) / 100);
+                    projectedNoSipLower.push(Math.round(tempNoSipLower * 100) / 100);
+                }
+
+                // Combine labels
+                labels = [...labels, ...projectedLabels];
+
+                const histSipData = [...graphData.map(d => d.wealth), ...Array(36).fill(null)];
+                const histNoSipData = [...graphDataNoSIP.map(d => d.wealth), ...Array(36).fill(null)];
+
+                const projSipData = [...Array(graphData.length - 1).fill(null), currentSipWealth, ...projectedSip];
+                const projNoSipData = [...Array(graphDataNoSIP.length - 1).fill(null), currentNoSipWealth, ...projectedNoSip];
+                const projSipUpperData = [...Array(graphData.length - 1).fill(null), currentSipWealth, ...projectedSipUpper];
+                const projSipLowerData = [...Array(graphData.length - 1).fill(null), currentSipWealth, ...projectedSipLower];
+                const projNoSipUpperData = [...Array(graphDataNoSIP.length - 1).fill(null), currentNoSipWealth, ...projectedNoSipUpper];
+                const projNoSipLowerData = [...Array(graphDataNoSIP.length - 1).fill(null), currentNoSipWealth, ...projectedNoSipLower];
+
+                datasets = [
+                    {
+                        label: 'Historical SIP (X=100, Y=5)',
+                        data: histSipData,
+                        borderColor: 'rgb(249, 115, 22)',
+                        tension: 0.1,
+                        fill: true,
+                        backgroundColor: 'rgba(249, 115, 22, 0.15)'
+                    },
+                    {
+                        label: 'Historical No-SIP (X=100, Y=0)',
+                        data: histNoSipData,
+                        borderColor: 'rgb(234, 179, 8)',
+                        tension: 0.1,
+                        fill: true,
+                        backgroundColor: 'rgba(234, 179, 8, 0.1)'
+                    },
+                    {
+                        label: 'Projected SIP (Expected)',
+                        data: projSipData,
+                        borderColor: 'rgb(249, 115, 22)',
+                        borderDash: [5, 5],
+                        tension: 0.1,
+                        fill: true,
+                        backgroundColor: 'rgba(249, 115, 22, 0.15)',
+                        pointRadius: 0
+                    },
+                    {
+                        label: 'Projected No-SIP (Expected)',
+                        data: projNoSipData,
+                        borderColor: 'rgb(234, 179, 8)',
+                        borderDash: [5, 5],
+                        tension: 0.1,
+                        fill: true,
+                        backgroundColor: 'rgba(234, 179, 8, 0.1)',
+                        pointRadius: 0
+                    },
+                    {
+                        label: 'Projection Upper Bound',
+                        data: projSipUpperData,
+                        borderColor: 'rgba(249, 115, 22, 0.2)',
+                        borderWidth: 1,
+                        pointRadius: 0,
+                        fill: false,
+                        showLine: true
+                    },
+                    {
+                        label: 'Projection Lower Bound',
+                        data: projSipLowerData,
+                        borderColor: 'rgba(249, 115, 22, 0.2)',
+                        borderWidth: 1,
+                        pointRadius: 0,
+                        fill: '-1',
+                        backgroundColor: 'rgba(249, 115, 22, 0.08)',
+                        showLine: true
+                    },
+                    {
+                        label: 'Projection Upper Bound (No-SIP)',
+                        data: projNoSipUpperData,
+                        borderColor: 'rgba(234, 179, 8, 0.2)',
+                        borderWidth: 1,
+                        pointRadius: 0,
+                        fill: false,
+                        showLine: true
+                    },
+                    {
+                        label: 'Projection Lower Bound (No-SIP)',
+                        data: projNoSipLowerData,
+                        borderColor: 'rgba(234, 179, 8, 0.2)',
+                        borderWidth: 1,
+                        pointRadius: 0,
+                        fill: '-1',
+                        backgroundColor: 'rgba(234, 179, 8, 0.06)',
+                        showLine: true
+                    }
+                ];
+            } else {
+                datasets = [{
+                    label: 'Wealth Growth (X=100, Y=5)',
+                    data: data.graphData.map(d => d.wealth),
+                    borderColor: 'rgb(249, 115, 22)',
+                    tension: 0.1,
+                    fill: true,
+                    backgroundColor: 'rgba(249, 115, 22, 0.15)'
+                },
+                {
+                    label: 'Wealth Growth (X=100, Y=0)',
+                    data: data.graphDataNoSIP.map(d => d.wealth),
+                    borderColor: 'rgb(234, 179, 8)',
+                    tension: 0.1,
+                    fill: true,
+                    backgroundColor: 'rgba(234, 179, 8, 0.15)'
+                }];
+            }
+
             if (chartInstance) {
                 chartInstance.destroy();
             }
@@ -359,23 +617,7 @@
                 type: 'line',
                 data: {
                     labels: labels,
-                    datasets: [{
-                        label: 'Wealth Growth (X=100, Y=5)',
-                        data: values,
-                        borderColor: 'rgb(249, 115, 22)',
-                        tension: 0.1,
-                        fill: true,
-                        backgroundColor: 'rgba(249, 115, 22, 0.15)'
-                    },
-                    {
-                        label: 'Wealth Growth (X=100, Y=0)',
-                        data: values2,
-                        borderColor: 'rgb(234, 179, 8)',
-                        tension: 0.1,
-                        fill: true,
-                        backgroundColor: 'rgba(234, 179, 8, 0.15)'
-                    }
-                    ]
+                    datasets: datasets
                 },
                 options: {
                     responsive: true,
@@ -395,7 +637,33 @@
                     },
                     plugins: {
                         legend: {
-                            labels: { color: '#ffffff' }
+                            labels: {
+                                color: '#ffffff',
+                                filter: function(item, chart) {
+                                    return !item.text.includes('Bound');
+                                }
+                            },
+                            onClick: function(e, legendItem, legend) {
+                                const index = legendItem.datasetIndex;
+                                const ci = legend.chart;
+                                const isVisible = ci.isDatasetVisible(index);
+                                
+                                // Toggle clicked dataset visibility
+                                ci.setDatasetVisibility(index, !isVisible);
+                                
+                                // Sync visibility for bounds if showProjection is active
+                                if (ci.data.datasets.length === 8) {
+                                    if (index === 2) { // Projected SIP (Expected)
+                                        ci.setDatasetVisibility(4, !isVisible); // Upper Bound SIP
+                                        ci.setDatasetVisibility(5, !isVisible); // Lower Bound SIP
+                                    } else if (index === 3) { // Projected No-SIP (Expected)
+                                        ci.setDatasetVisibility(6, !isVisible); // Upper Bound No-SIP
+                                        ci.setDatasetVisibility(7, !isVisible); // Lower Bound No-SIP
+                                    }
+                                }
+                                
+                                ci.update();
+                            }
                         }
                     }
                 }
@@ -527,6 +795,77 @@
             const base64 = btoa(jsonStr);
             const base64url = base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
             window.location.href = window.location.pathname + "?code=" + base64url;
+        }
+
+        function toggleProjection(checked) {
+            if (latestPortfolioData) {
+                renderResults(latestPortfolioData);
+            }
+        }
+
+        function getNextMonth(monthStr) {
+            const parts = monthStr.split(' ');
+            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            let monthIdx = months.indexOf(parts[0]);
+            let year = parseInt(parts[1]);
+            
+            monthIdx++;
+            if (monthIdx > 11) {
+                monthIdx = 0;
+                year++;
+            }
+            return `${months[monthIdx]} ${year}`;
+        }
+
+        function calculateXirr(cashFlows) {
+            if (!cashFlows || cashFlows.length < 2) return 0.0;
+            if (cashFlows[cashFlows.length - 1].amount <= 0) return -100.0;
+
+            let low = -0.999;
+            let high = 100.0;
+            const tolerance = 1e-6;
+            const maxIterations = 100;
+
+            let npvLow = calculateNpv(low, cashFlows);
+            let npvHigh = calculateNpv(high, cashFlows);
+
+            if (npvLow * npvHigh > 0) {
+                if (npvLow < 0) return -99.9;
+                if (npvHigh > 0) return 10000.0;
+                return 0.0;
+            }
+
+            let mid = 0.0;
+            for (let i = 0; i < maxIterations; i++) {
+                mid = (low + high) / 2.0;
+                const npvMid = calculateNpv(mid, cashFlows);
+
+                if (Math.abs(npvMid) < tolerance || (high - low) / 2.0 < tolerance) {
+                    return mid * 100.0;
+                }
+
+                if (npvMid * npvLow > 0) {
+                    low = mid;
+                    npvLow = npvMid;
+                } else {
+                    high = mid;
+                    npvHigh = npvMid;
+                }
+            }
+            return mid * 100.0;
+        }
+
+        function calculateNpv(r, cashFlows) {
+            let npv = 0.0;
+            const d1 = new Date(cashFlows[0].date);
+
+            for (let i = 0; i < cashFlows.length; i++) {
+                const cf = cashFlows[i];
+                const d = new Date("01 " + cf.date.replace(/^\d+\s+/, ""));
+                const t = (d - d1) / (1000 * 60 * 60 * 24 * 365.0);
+                npv += cf.amount / Math.pow(1.0 + r, t);
+            }
+            return npv;
         }
     </script>
 }
