@@ -8,7 +8,7 @@
     var symbolDescriptions = DataProcessHelper.SymbolDescriptions;
 }
 
-<div class="container mt-4">
+<div class="container mt-4 mb-5">
     <h2>Compare Strategies</h2>
     <hr />
 
@@ -111,8 +111,13 @@
         <div class="col-md-4">
             <input type="number" class="form-control percentage-input" placeholder="Percentage (%)" min="0" max="100">
         </div>
-        <div class="col-md-2">
-            <button class="btn btn-outline-danger" onclick="this.closest('.item-row').remove()">×</button>
+        <div class="col-md-2 d-flex align-items-center">
+            <button type="button" class="btn btn-delete-row" onclick="this.closest('.item-row').remove()" title="Remove Asset">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
         </div>
     </div>
 </template>
@@ -177,13 +182,13 @@
             });
         }
         const palette = [
-            'rgb(75, 192, 192)',
-            'rgb(54, 162, 235)',
-            'rgb(255, 99, 132)',
-            'rgb(255, 159, 64)',
-            'rgb(153, 102, 255)',
-            'rgb(201, 203, 207)',
-            'rgb(99, 255, 132)'
+            'rgb(249, 115, 22)',
+            'rgb(234, 179, 8)',
+            'rgb(239, 68, 68)',
+            'rgb(99, 102, 241)',
+            'rgb(6, 182, 212)',
+            'rgb(16, 185, 129)',
+            'rgb(236, 72, 153)'
         ];
 
         document.addEventListener("DOMContentLoaded", () => {
@@ -698,18 +703,37 @@
             document.querySelectorAll('.custom-dropdown-menu').forEach(menu => {
                 if (menu !== triggerElement.nextElementSibling) {
                     menu.style.display = 'none';
+                    const dropdown = menu.closest('.custom-dropdown');
+                    if (dropdown) dropdown.classList.remove('dropup');
+                    const card = menu.closest('.card');
+                    if (card) card.style.zIndex = '';
                 }
             });
             
             const menu = triggerElement.nextElementSibling;
+            const dropdown = triggerElement.closest('.custom-dropdown');
+            const card = triggerElement.closest('.card');
+            
             if (menu.style.display === 'none') {
+                const rect = triggerElement.getBoundingClientRect();
+                const spaceBelow = window.innerHeight - rect.bottom;
+                const menuHeight = 350;
+                if (spaceBelow < menuHeight && rect.top > spaceBelow) {
+                    dropdown.classList.add('dropup');
+                } else {
+                    dropdown.classList.remove('dropup');
+                }
+
                 menu.style.display = 'block';
+                if (card) card.style.zIndex = '100';
                 const active = menu.querySelector('.custom-dropdown-option.active');
                 if (active) {
                     active.scrollIntoView({ block: 'nearest' });
                 }
             } else {
                 menu.style.display = 'none';
+                dropdown.classList.remove('dropup');
+                if (card) card.style.zIndex = '';
             }
         }
 
@@ -717,13 +741,23 @@
             const val = optionElement.getAttribute('data-value');
             const row = optionElement.closest('.item-row');
             setSelectValue(row, val);
-            optionElement.closest('.custom-dropdown-menu').style.display = 'none';
+            
+            const menu = optionElement.closest('.custom-dropdown-menu');
+            menu.style.display = 'none';
+            const dropdown = menu.closest('.custom-dropdown');
+            if (dropdown) dropdown.classList.remove('dropup');
+            const card = menu.closest('.card');
+            if (card) card.style.zIndex = '';
         }
 
         document.addEventListener('click', function(event) {
             if (!event.target.closest('.custom-dropdown')) {
                 document.querySelectorAll('.custom-dropdown-menu').forEach(menu => {
                     menu.style.display = 'none';
+                    const dropdown = menu.closest('.custom-dropdown');
+                    if (dropdown) dropdown.classList.remove('dropup');
+                    const card = menu.closest('.card');
+                    if (card) card.style.zIndex = '';
                 });
             }
         });

@@ -5,7 +5,7 @@
     var symbolDescriptions = DataProcessHelper.SymbolDescriptions;
 }
 
-<div class="container mt-4">
+<div class="container mt-4 mb-5">
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
         <h2 class="mb-0">Portfolio Simulation</h2>
         <button type="button" class="btn btn-outline-info" onclick="loadAiPortfolio()">✨ AI Suggested Portfolio</button>
@@ -58,11 +58,11 @@
             <div class="row mb-3">
                 <div class="col-md-6">
                     <label>Start Date</label>
-                    <input type="date" class="form-control start-date" required>
+                    <input type="text" class="form-control start-date" placeholder="Select Start Date..." required>
                 </div>
                 <div class="col-md-6">
                     <label>End Date</label>
-                    <input type="date" class="form-control end-date" required>
+                    <input type="text" class="form-control end-date" placeholder="Select End Date..." required>
                 </div>
             </div>
             <h6>Assets</h6>
@@ -111,8 +111,13 @@
         <div class="col-md-4">
             <input type="number" class="form-control percentage-input" placeholder="Percentage (%)" min="0" max="100">
         </div>
-        <div class="col-md-2">
-            <button class="btn btn-outline-danger" onclick="this.closest('.item-row').remove()">×</button>
+        <div class="col-md-2 d-flex align-items-center">
+            <button type="button" class="btn btn-delete-row" onclick="this.closest('.item-row').remove()" title="Remove Asset">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
         </div>
     </div>
 </template>
@@ -162,11 +167,12 @@
                     const lastPeriod = container.lastElementChild;
 
                     // Set Dates
-                    // Format to yyyy-MM-dd for HTML date input
                     const startDate = period.startDate.split('T')[0];
                     const endDate = period.endDate.split('T')[0];
                     lastPeriod.querySelector('.start-date').value = startDate;
                     lastPeriod.querySelector('.end-date').value = endDate;
+
+                    initDatePicker(lastPeriod);
 
                     // Clear the default item added by any logic and add from data
                     const itemsContainer = lastPeriod.querySelector('.items-container');
@@ -192,6 +198,13 @@
             }
         }
 
+        function initDatePicker(parent) {
+            flatpickr(parent.querySelectorAll('.start-date, .end-date'), {
+                dateFormat: 'Y-m-d',
+                disableMobile: "true"
+            });
+        }
+
         function addPeriod() {
             const container = document.getElementById('periodsContainer');
             const template = document.getElementById('periodTemplate').content.cloneNode(true);
@@ -200,6 +213,8 @@
             // Add one default item to the new period
             const lastPeriod = container.lastElementChild;
             addItem(lastPeriod.querySelector('.btn-outline-info'));
+            
+            initDatePicker(lastPeriod);
         }
 
         function addItem(button) {
@@ -347,18 +362,18 @@
                     datasets: [{
                         label: 'Wealth Growth (X=100, Y=5)',
                         data: values,
-                        borderColor: 'rgb(75, 192, 192)',
+                        borderColor: 'rgb(249, 115, 22)',
                         tension: 0.1,
                         fill: true,
-                        backgroundColor: 'rgba(75, 192, 192, 0.2)'
+                        backgroundColor: 'rgba(249, 115, 22, 0.15)'
                     },
                     {
                         label: 'Wealth Growth (X=100, Y=0)',
                         data: values2,
-                        borderColor: 'rgb(54, 162, 235)',
+                        borderColor: 'rgb(234, 179, 8)',
                         tension: 0.1,
                         fill: true,
-                        backgroundColor: 'rgba(54, 162, 235, 0.2)'
+                        backgroundColor: 'rgba(234, 179, 8, 0.15)'
                     }
                     ]
                 },
@@ -427,18 +442,37 @@
             document.querySelectorAll('.custom-dropdown-menu').forEach(menu => {
                 if (menu !== triggerElement.nextElementSibling) {
                     menu.style.display = 'none';
+                    const dropdown = menu.closest('.custom-dropdown');
+                    if (dropdown) dropdown.classList.remove('dropup');
+                    const card = menu.closest('.card');
+                    if (card) card.style.zIndex = '';
                 }
             });
             
             const menu = triggerElement.nextElementSibling;
+            const dropdown = triggerElement.closest('.custom-dropdown');
+            const card = triggerElement.closest('.card');
+            
             if (menu.style.display === 'none') {
+                const rect = triggerElement.getBoundingClientRect();
+                const spaceBelow = window.innerHeight - rect.bottom;
+                const menuHeight = 350;
+                if (spaceBelow < menuHeight && rect.top > spaceBelow) {
+                    dropdown.classList.add('dropup');
+                } else {
+                    dropdown.classList.remove('dropup');
+                }
+
                 menu.style.display = 'block';
+                if (card) card.style.zIndex = '100';
                 const active = menu.querySelector('.custom-dropdown-option.active');
                 if (active) {
                     active.scrollIntoView({ block: 'nearest' });
                 }
             } else {
                 menu.style.display = 'none';
+                dropdown.classList.remove('dropup');
+                if (card) card.style.zIndex = '';
             }
         }
 
@@ -446,13 +480,23 @@
             const val = optionElement.getAttribute('data-value');
             const row = optionElement.closest('.item-row');
             setSelectValue(row, val);
-            optionElement.closest('.custom-dropdown-menu').style.display = 'none';
+            
+            const menu = optionElement.closest('.custom-dropdown-menu');
+            menu.style.display = 'none';
+            const dropdown = menu.closest('.custom-dropdown');
+            if (dropdown) dropdown.classList.remove('dropup');
+            const card = menu.closest('.card');
+            if (card) card.style.zIndex = '';
         }
 
         document.addEventListener('click', function(event) {
             if (!event.target.closest('.custom-dropdown')) {
                 document.querySelectorAll('.custom-dropdown-menu').forEach(menu => {
                     menu.style.display = 'none';
+                    const dropdown = menu.closest('.custom-dropdown');
+                    if (dropdown) dropdown.classList.remove('dropup');
+                    const card = menu.closest('.card');
+                    if (card) card.style.zIndex = '';
                 });
             }
         });
